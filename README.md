@@ -71,3 +71,6 @@ Details dazu auch im jeweiligen Tool-README.
 ## Lizenz / Weiterverwendung
 
 Baut gerne darauf auf, passt es an eure Hochschule an, gebt Verbesserungen zurück. Ersetzt überall die Platzhalter (`matrix.eure-hochschule.de`, Beispiel-IDs) durch eure echten Werte.
+
+## Transparenz
+Hello, das wurde von einem Nicht-Informatiker mit Claude Code umgesetzt. Wenn es Probleme gibt - gerne melden :))
