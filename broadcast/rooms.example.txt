@@ -1,0 +1,6 @@
+// Eine Zeile pro Raum: entweder als Room-ID (!...) ODER als Alias (#...).
+// Aliase werden vom Script automatisch aufgeloest.
+// Zeilen mit // am Anfang sind Kommentare und werden ignoriert.
+!beispielraum01abcdefgh:matrix.eure-hochschule.de
+#eure-gruppe-02:matrix.eure-hochschule.de
+!beispielraum03abcdefgh:matrix.eure-hochschule.de
