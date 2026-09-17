@@ -1,0 +1,30 @@
+{
+  "wrong_server": {
+    "enabled": true,
+    "watch_rooms": [
+      "!DEIN_SPACE_ODER_RAUM_HIER:matrix.eure-hochschule.de"
+    ],
+    "correct_domain": "matrix.eure-hochschule.de",
+    "guide_url": "https://eure-hochschule.de/matrix-anleitung",
+    "sender_name": "deine Fachschaft",
+    "dry_run": false
+  },
+
+  "auto_invite_rules": [
+    {
+      "_comment": "Beispiel 1: Space -> spezifischer Raum (z.B. 'Aktive Fachschaft')",
+      "source_rooms": ["!DEIN_SPACE_HIER:matrix.eure-hochschule.de"],
+      "target_room": "!DEIN_ZIELRAUM_HIER:matrix.eure-hochschule.de",
+      "dry_run": false
+    },
+    {
+      "_comment": "Beispiel 2: nur ausgewählte Kanäle -> Space (nicht alle Kanäle)",
+      "source_rooms": [
+        "!KANAL_1_HIER:matrix.eure-hochschule.de",
+        "!KANAL_2_HIER:matrix.eure-hochschule.de"
+      ],
+      "target_room": "!DEIN_SPACE_HIER:matrix.eure-hochschule.de",
+      "dry_run": false
+    }
+  ]
+}

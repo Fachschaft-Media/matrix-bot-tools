@@ -8,10 +8,11 @@ Eine Sammlung von Python-Scripts zur Verwaltung großer Matrix/Element-Communiti
 
 | Ordner | Zweck |
 |---|---|
+| [`watchdog/`](watchdog/README.md) | **Empfohlen für Dauerbetrieb:** vereinheitlichtes Tool, kombiniert Wrong-Server-Check + beliebig viele Auto-Invite-Regeln über eine einzige `settings.json` — eine Session, kein Token-Tennis |
 | [`broadcast/`](broadcast/README.md) | Eine Nachricht gleichzeitig an viele Räume schicken (z.B. Ansagen an alle Gruppen-Räume) |
 | [`create-rooms/`](create-rooms/README.md) | Viele gleichartige Räume auf einmal erstellen (z.B. 150 Gruppenräume für ein Event) |
-| [`sync-members/`](sync-members/README.md) | Mitglieder eines Space automatisch in einen anderen Raum einladen (einmalig oder live) |
-| [`wrong-server-watchdog/`](wrong-server-watchdog/README.md) | Neue Mitglieder mit falschem Matrix-Server automatisch per DM auf den Fehler hinweisen |
+| [`sync-members/`](sync-members/README.md) | Einzel-Tool: Mitglieder eines Space automatisch in einen anderen Raum einladen (einmalig oder live) |
+| [`wrong-server-watchdog/`](wrong-server-watchdog/README.md) | Einzel-Tool: neue Mitglieder mit falschem Matrix-Server automatisch per DM auf den Fehler hinweisen |
 | [`auth/`](auth/README.md) | Login-Helfer für Hochschul-SSO/OIDC-Server, holt Access- und Refresh-Token |
 | `lib/` | Geteiltes Hilfsmodul (`matrix_auth.py`) für automatischen Token-Refresh, wird von den Dauerlauf-Scripts genutzt |
 
@@ -50,6 +51,8 @@ Wie ihr an Zugangsdaten kommt, hängt vom Login-Verfahren eures Matrix-Servers a
 
 **Wichtig, wenn mehrere Dauerlauf-Scripts gleichzeitig laufen:** Jedes Script braucht eine **eigene** `config.json` mit einer **eigenen** Login-Session (eigener `device_id`). Teilen sich zwei Scripts dieselbe Session, invalidiert ein Token-Refresh im einen Script den gerade aktiven Token im anderen — das führt zu einer Endlosschleife aus gegenseitigen Refreshes ("Token-Tennis"). Für jedes Dauerlauf-Script also mit `--config <eigene-datei>.json` eine eigene Session anlegen.
 
+**Einfacher: das vereinheitlichte [`watchdog/`](watchdog/README.md)-Tool nutzen.** Statt mehrere Einzel-Scripts parallel laufen zu lassen, kombiniert es alles in einem Prozess mit einer Session — das Token-Tennis-Problem tritt dann gar nicht erst auf.
+
 ## Einmalig laufende Scripts vs. Dauerlauf-Scripts
 
 Zwei Kategorien von Tools hier:
@@ -71,6 +74,3 @@ Details dazu auch im jeweiligen Tool-README.
 ## Lizenz / Weiterverwendung
 
 Baut gerne darauf auf, passt es an eure Hochschule an, gebt Verbesserungen zurück. Ersetzt überall die Platzhalter (`matrix.eure-hochschule.de`, Beispiel-IDs) durch eure echten Werte.
-
-## Transparenz
-Hello, das wurde von einem Nicht-Informatiker mit Claude Code umgesetzt. Wenn es Probleme gibt - gerne melden :))

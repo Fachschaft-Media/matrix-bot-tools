@@ -1,6 +1,11 @@
 # Sync Members
 
-Lädt automatisch alle Mitglieder eines Space (oder Raums) in einen anderen Raum ein — z.B. jede Person, die eurem Fachschafts-Space beitritt, automatisch in die Gruppe "Aktive Fachschaft".
+Lädt automatisch Mitglieder bestimmter Räume in einen anderen Raum ein. Funktioniert in beide Richtungen:
+
+- **Space → Raum:** jede Person, die eurem Fachschafts-Space beitritt, automatisch in die Gruppe "Aktive Fachschaft" einladen
+- **Ausgewählte Kanäle → Space:** wer einem oder mehreren bestimmten Kanälen beitritt (nicht allen Kanälen im Space), bekommt automatisch eine Einladung zum übergeordneten Space (oder einem anderen Raum)
+
+Beide Richtungen nutzen dieselben Scripts — `--source` einfach mehrfach angeben, um mehrere ausgewählte Quellräume zu überwachen; `--target` kann genauso gut ein Space wie ein normaler Raum sein.
 
 Drei Varianten in diesem Ordner, je nach Bedarf:
 
@@ -31,7 +36,13 @@ python matrix_sync_members.py --source '!spaceid' --target '!zielraumid'
 python matrix_sync_members_watchdog.py --source '!spaceid' --target '!zielraumid' --config config.json
 ```
 
-Macht beim Start einen vollständigen Abgleich (wie die Einmal-Variante), läuft danach weiter und lädt jede neu beitretende Person **sofort** ein.
+Für die "ausgewählte Kanäle → Space"-Richtung: `--source` mehrfach angeben, `--target` ist dann die Space-ID:
+
+```
+python matrix_sync_members_watchdog.py --source '!kanal1' --source '!kanal2' --target '!spaceid' --config config.json
+```
+
+Macht beim Start einen vollständigen Abgleich (wie die Einmal-Variante, über alle angegebenen Quellräume kombiniert), läuft danach weiter und lädt jede neu beitretende Person **sofort** ein — egal, über welchen der Quellräume sie beigetreten ist.
 
 Für Dauerbetrieb: `start_sync_watchdog.bat` anpassen (Pfade, IDs) und über die Windows-Aufgabenplanung mit Trigger "Bei Systemstart" einrichten — Details im Haupt-README.
 
