@@ -24,18 +24,17 @@ hat, wird beim nächsten Sync NICHT erneut eingeladen.
 BENUTZUNG
 ---------
     # Erst mal nur anschauen, wer eingeladen würde (nichts wird verschickt):
-    python3 matrix_sync_members.py --source '!DEINE_QUELL_SPACE_ID_HIER:matrix.eure-hochschule.de' \
+    matrix-tools sync-members --source '!DEINE_QUELL_SPACE_ID_HIER:matrix.eure-hochschule.de' \
         --target '!DEINE_ZIEL_RAUM_ID_HIER:matrix.eure-hochschule.de' \
         --dry-run
 
     # Tatsächlich einladen:
-    python3 matrix_sync_members.py --source '!DEINE_QUELL_SPACE_ID_HIER:matrix.eure-hochschule.de' \
+    matrix-tools sync-members --source '!DEINE_QUELL_SPACE_ID_HIER:matrix.eure-hochschule.de' \
         --target '!DEINE_ZIEL_RAUM_ID_HIER:matrix.eure-hochschule.de'
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import sys
@@ -43,13 +42,9 @@ from pathlib import Path
 
 from nio import AsyncClient, JoinedMembersResponse, RoomGetStateResponse, RoomInviteResponse
 
-# Windows-Konsolen nutzen oft cp1252, das kann Emojis nicht darstellen und
-# crasht sonst bei jedem print() mit einem UnicodeEncodeError. UTF-8 erzwingen:
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+from matrix_tools.paths import resolve
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+CONFIG_PATH = resolve("config.json")
 
 
 def load_config() -> dict:
@@ -150,10 +145,7 @@ async def sync_members(source_room: str, target_room: str, dry_run: bool) -> Non
             print(f"  - {user_id}: {err}")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Mitglieder eines Raums/Space automatisch in einen anderen Raum einladen."
-    )
+def add_arguments(parser):
     parser.add_argument("--source", required=True, help="Room-ID des Quellraums (z.B. der Space).")
     parser.add_argument("--target", required=True, help="Room-ID des Zielraums.")
     parser.add_argument(
@@ -161,10 +153,15 @@ def main():
         action="store_true",
         help="Nur anzeigen, wer eingeladen würde, ohne tatsächlich einzuladen.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--config", default="config.json",
+        help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
+    )
+
+
+def run(args):
+    global CONFIG_PATH
+    CONFIG_PATH = resolve(args.config)
 
     asyncio.run(sync_members(args.source, args.target, args.dry_run))
 
-
-if __name__ == "__main__":
-    main()

@@ -18,21 +18,20 @@ Token-Refresh gegenseitig aussperren ("Token-Tennis").
 
 SETUP
 -----
-1. config.json in diesem Ordner anlegen (Zugangsdaten, siehe Haupt-README
-   bzw. auth/get_token.py für SSO-Server).
-2. settings.example.json nach settings.json kopieren und an eure Bedürfnisse
-   anpassen (siehe Kommentare dort bzw. README.md in diesem Ordner).
+1. config.json im Daten-Ordner anlegen (Zugangsdaten, siehe Haupt-README
+   bzw. 'matrix-tools login' für SSO-Server).
+2. examples/settings.example.json nach settings.json kopieren und an eure
+   Bedürfnisse anpassen (siehe docs/watchdog.md).
 
 BENUTZUNG
 ---------
-    python matrix_watchdog.py
-    python matrix_watchdog.py --settings settings.json --config config.json
-    python matrix_watchdog.py --dry-run    # nichts wird tatsächlich verschickt/eingeladen
+    matrix-tools watchdog
+    matrix-tools watchdog --settings settings.json --config config.json
+    matrix-tools watchdog --dry-run    # nichts wird tatsächlich verschickt/eingeladen
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import sys
@@ -50,16 +49,12 @@ from nio import (
     SyncError,
 )
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
-from matrix_auth import refresh_access_token, is_token_error
+from matrix_tools.auth import is_token_error, refresh_access_token
+from matrix_tools.paths import resolve
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-CONFIG_PATH = Path(__file__).parent / "config.json"
-SETTINGS_PATH = Path(__file__).parent / "settings.json"
-NOTIFIED_PATH = Path(__file__).parent / "notified_wrong_server.json"
+CONFIG_PATH = resolve("config.json")
+SETTINGS_PATH = resolve("settings.json")
+NOTIFIED_PATH = resolve("notified_wrong_server.json")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -76,7 +71,7 @@ def load_config() -> dict:
 def load_settings() -> dict:
     if not SETTINGS_PATH.exists():
         print(f"❌ Keine settings.json gefunden unter {SETTINGS_PATH}")
-        print("   Kopiere settings.example.json nach settings.json und passe sie an.")
+        print("   Kopiere examples/settings.example.json nach settings.json und passe sie an.")
         sys.exit(1)
     return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
 
@@ -214,7 +209,7 @@ async def initial_invite_pass(client: AsyncClient, rule: dict, global_dry_run: b
 # Haupt-Loop
 # ─────────────────────────────────────────────────────────────────────────
 
-async def run(settings: dict, global_dry_run: bool) -> None:
+async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
     config = load_config()
     notified = load_notified()
 
@@ -304,10 +299,7 @@ async def run(settings: dict, global_dry_run: bool) -> None:
                 await asyncio.sleep(10)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Vereinheitlichtes Matrix-Dauerlauf-Tool, config-gesteuert."
-    )
+def add_arguments(parser):
     parser.add_argument(
         "--config", default="config.json",
         help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
@@ -320,19 +312,13 @@ def main():
         "--dry-run", action="store_true",
         help="GLOBAL nichts tatsächlich senden/einladen, egal was in settings.json steht.",
     )
-    args = parser.parse_args()
 
-    global CONFIG_PATH, SETTINGS_PATH
-    CONFIG_PATH = Path(__file__).parent / args.config
-    SETTINGS_PATH = Path(__file__).parent / args.settings
+
+def run(args):
+    global CONFIG_PATH, SETTINGS_PATH, NOTIFIED_PATH
+    CONFIG_PATH = resolve(args.config)
+    SETTINGS_PATH = resolve(args.settings)
+    NOTIFIED_PATH = resolve("notified_wrong_server.json")
 
     settings = load_settings()
-
-    try:
-        asyncio.run(run(settings, args.dry_run))
-    except KeyboardInterrupt:
-        print("\n👋 Beendet.")
-
-
-if __name__ == "__main__":
-    main()
+    asyncio.run(run_watchdog(settings, args.dry_run))

@@ -4,11 +4,11 @@ Matrix Room-Creator
 ====================
 Erstellt automatisch N Matrix-Räume (z.B. 100 Gruppen-Räume für die Campus
 Rallye), hängt sie optional in einen bestehenden Space ein und schreibt die
-neuen Room-IDs direkt in eine rooms.txt (kompatibel mit matrix_broadcast.py).
+neuen Room-IDs direkt in eine rooms.txt (kompatibel mit 'matrix-tools broadcast').
 
 SETUP
 -----
-Nutzt die gleiche config.json wie matrix_broadcast.py:
+Nutzt die gleiche config.json wie 'matrix-tools broadcast':
     {
       "homeserver": "https://matrix.h-da.de",
       "user_id": "@rallye-bot:matrix.h-da.de",
@@ -18,27 +18,26 @@ Nutzt die gleiche config.json wie matrix_broadcast.py:
 BENUTZUNG
 ---------
     # 100 Räume "Gruppe 01" bis "Gruppe 100" erstellen:
-    python matrix_create_rooms.py --count 100 --prefix "Gruppe"
+    matrix-tools create-rooms --count 100 --prefix "Gruppe"
 
     # In einen bestehenden Space einhängen (Space-ID aus Element, Raumeinstellungen -> Erweitert):
-    python matrix_create_rooms.py --count 100 --prefix "Gruppe" --space "!spaceid:matrix.h-da.de"
+    matrix-tools create-rooms --count 100 --prefix "Gruppe" --space "!spaceid:matrix.h-da.de"
 
     # Zusätzlich einen Alias vergeben (z.B. #rallye-gruppe-01:matrix.h-da.de):
-    python matrix_create_rooms.py --count 100 --prefix "Gruppe" --alias-prefix "rallye-gruppe"
+    matrix-tools create-rooms --count 100 --prefix "Gruppe" --alias-prefix "rallye-gruppe"
 
     # Startnummer anpassen (z.B. wenn schon 20 Räume existieren):
-    python matrix_create_rooms.py --count 80 --prefix "Gruppe" --start 21
+    matrix-tools create-rooms --count 80 --prefix "Gruppe" --start 21
 
 HINWEISE
 --------
 - Räume werden standardmäßig privat (invite-only) erstellt.
 - Der Bot ist automatisch Mitglied (Ersteller) jedes Raums, das reicht für
-  matrix_broadcast.py - eine Einladung ist NICHT nötig.
+  'matrix-tools broadcast' - eine Einladung ist NICHT nötig.
 - Die erzeugten Room-IDs werden an --rooms-out angehängt (Default: rooms.txt),
   bestehende Einträge bleiben erhalten.
 """
 
-import argparse
 import asyncio
 import json
 import sys
@@ -47,12 +46,9 @@ from typing import Optional
 
 from nio import AsyncClient, RoomCreateResponse, RoomVisibility
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+from matrix_tools.paths import resolve
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-DEFAULT_ROOMS_OUT = Path(__file__).parent / "rooms.txt"
+CONFIG_PATH = resolve("config.json")
 
 
 def load_config() -> dict:
@@ -145,8 +141,7 @@ async def create_rooms(
             print(f"  - {name}: {err}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Mehrere Matrix-Räume auf einmal erstellen.")
+def add_arguments(parser):
     parser.add_argument("--count", type=int, required=True, help="Anzahl der zu erstellenden Räume.")
     parser.add_argument("--prefix", default="Gruppe", help="Namens-Präfix, z.B. 'Gruppe' -> 'Gruppe 01'.")
     parser.add_argument("--start", type=int, default=1, help="Startnummer (Default: 1).")
@@ -157,8 +152,7 @@ def main():
     )
     parser.add_argument(
         "--rooms-out",
-        type=Path,
-        default=DEFAULT_ROOMS_OUT,
+        default="rooms.txt",
         help="Datei, an die die neuen Room-IDs angehängt werden (Default: rooms.txt).",
     )
     parser.add_argument(
@@ -166,7 +160,15 @@ def main():
         action="store_true",
         help="Räume öffentlich statt invite-only erstellen (Default: privat).",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--config", default="config.json",
+        help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
+    )
+
+
+def run(args):
+    global CONFIG_PATH
+    CONFIG_PATH = resolve(args.config)
 
     print(f"🏗️  Erstelle {args.count} Räume '{args.prefix} {str(args.start).zfill(2)}' ff...\n")
 
@@ -177,11 +179,8 @@ def main():
             start=args.start,
             space_id=args.space,
             alias_prefix=args.alias_prefix,
-            rooms_out=args.rooms_out,
+            rooms_out=resolve(args.rooms_out),
             public=args.public,
         )
     )
 
-
-if __name__ == "__main__":
-    main()

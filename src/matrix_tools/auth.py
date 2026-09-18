@@ -1,13 +1,13 @@
 """
-matrix_auth.py
-================
+Token-Refresh
+=============
 Gemeinsame Hilfsfunktion für die Dauerlauf-Scripts: erneuert automatisch den
 Access Token über den gespeicherten Refresh Token, wenn der Server
 'M_UNKNOWN_TOKEN' meldet. Aktualisiert sowohl den laufenden Client als auch
 die config.json auf der Platte.
 
 Setzt voraus, dass die config.json einen 'refresh_token' enthält - den
-bekommst du über get_token.py (einmaliger SSO-Login).
+bekommst du über 'matrix-tools login' (einmaliger SSO-Login).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def refresh_access_token(config_path: Path, client) -> bool:
     refresh_token = config.get("refresh_token")
 
     if not refresh_token:
-        print("❌ Kein refresh_token in config.json. Bitte 'python get_token.py' ausführen.")
+        print("❌ Kein refresh_token in config.json. Bitte 'matrix-tools login' ausführen.")
         return False
 
     print("🔄 Access Token abgelaufen - hole neuen per Refresh Token...")
@@ -42,7 +42,7 @@ def refresh_access_token(config_path: Path, client) -> bool:
 
     if resp.status_code != 200:
         print(f"❌ Token-Refresh fehlgeschlagen ({resp.status_code}): {resp.text}")
-        print("   Refresh Token ist vermutlich auch abgelaufen. Bitte 'python get_token.py' erneut ausführen.")
+        print("   Refresh Token ist vermutlich auch abgelaufen. Bitte 'matrix-tools login' erneut ausführen.")
         return False
 
     data = resp.json()

@@ -7,40 +7,35 @@ Gruppen-Räume der Campus Rallye).
 
 SETUP
 -----
-1. Access Token deines Matrix-Accounts holen:
-   - Element -> Einstellungen -> Hilfe & Info -> Erweitert -> Access Token
-   - ODER via curl:
-     curl -XPOST -d '{"type":"m.login.password","user":"NUTZERNAME","password":"PASSWORT"}' \
-       "https://DEIN-HOMESERVER/_matrix/client/r0/login"
+1. config.json anlegen (per 'matrix-tools login' oder Access Token aus
+   Element -> Einstellungen -> Hilfe & Info -> Erweitert -> Access Token)
 2. Account muss Mitglied in ALLEN Gruppen-Räumen sein (z.B. weil er sie mit
-   matrix_create_rooms.py erstellt hat)
+   'matrix-tools create-rooms' erstellt hat)
 3. rooms.txt befüllen: eine Zeile pro Raum, entweder als Room-ID
    (!abcdefgh:matrix.h-da.de) ODER als Alias (#gruppe-001:matrix.h-da.de) -
    beides wird akzeptiert, Aliase werden automatisch aufgelöst.
    Zeilen mit // am Anfang werden als Kommentar ignoriert.
-4. config.json mit homeserver, user_id und access_token anlegen (siehe unten)
 
 BENUTZUNG
 ---------
-    python matrix_broadcast.py "Wichtige Ansage an alle Gruppen: ..."
+    matrix-tools broadcast "Wichtige Ansage an alle Gruppen: ..."
 
     # Nachricht aus Datei (z.B. für längere/formatierte Texte):
-    python matrix_broadcast.py --file ansage.txt
+    matrix-tools broadcast --file ansage.txt
 
     # Nur an eine Teilmenge senden (Test):
-    python matrix_broadcast.py "Testnachricht" --rooms rooms_test.txt
+    matrix-tools broadcast "Testnachricht" --rooms rooms_test.txt
 
     # Nachricht mit Markdown-Formatierung (fett, Listen etc.) senden:
-    python matrix_broadcast.py "**Wichtig:** Treffpunkt ist um 14 Uhr" --markdown
+    matrix-tools broadcast "**Wichtig:** Treffpunkt ist um 14 Uhr" --markdown
 
     # Direkt per Alias-Range senden, ohne rooms.txt zu befüllen:
-    python matrix_broadcast.py "Ansage an alle Gruppen" \
+    matrix-tools broadcast "Ansage an alle Gruppen" \
         --alias-range '#gruppe-001:matrix.eure-hochschule.de..#gruppe-150:matrix.eure-hochschule.de'
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import sys
@@ -48,12 +43,9 @@ from pathlib import Path
 
 from nio import AsyncClient, LoginResponse, RoomSendResponse
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+from matrix_tools.paths import resolve
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-DEFAULT_ROOMS_PATH = Path(__file__).parent / "rooms.txt"
+CONFIG_PATH = resolve("config.json")
 
 
 def load_config() -> dict:
@@ -134,7 +126,6 @@ async def broadcast_refs(message: str, room_ids: list[str], use_markdown: bool) 
             content["formatted_body"] = html
         except ImportError:
             print("⚠️  Paket 'markdown' nicht installiert, sende als Plaintext.")
-            print("    Installieren mit: pip install markdown --break-system-packages\n")
 
     success, failed = [], []
 
@@ -171,14 +162,12 @@ async def broadcast_refs(message: str, room_ids: list[str], use_markdown: bool) 
             print(f"  - {room_id}: {err}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Nachricht an mehrere Matrix-Räume broadcasten.")
+def add_arguments(parser):
     parser.add_argument("message", nargs="?", help="Die zu sendende Nachricht.")
-    parser.add_argument("--file", type=Path, help="Nachricht aus Textdatei lesen statt Argument.")
+    parser.add_argument("--file", help="Nachricht aus Textdatei lesen statt Argument.")
     parser.add_argument(
         "--rooms",
-        type=Path,
-        default=DEFAULT_ROOMS_PATH,
+        default="rooms.txt",
         help="Pfad zur Raumliste (Default: rooms.txt).",
     )
     parser.add_argument(
@@ -193,15 +182,23 @@ def main():
             "'#gruppe-001:matrix.eure-hochschule.de..#gruppe-150:matrix.eure-hochschule.de'"
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--config", default="config.json",
+        help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
+    )
+
+
+def run(args):
+    global CONFIG_PATH
+    CONFIG_PATH = resolve(args.config)
 
     if args.file:
-        message = args.file.read_text(encoding="utf-8").strip()
+        message = resolve(args.file).read_text(encoding="utf-8").strip()
     elif args.message:
         message = args.message
     else:
-        parser.error("Entweder eine Nachricht als Argument oder --file angeben.")
-        return
+        print("❌ Entweder eine Nachricht als Argument oder --file angeben.")
+        sys.exit(2)
 
     if args.alias_range:
         start_alias, end_alias = args.alias_range.split("..")
@@ -217,8 +214,5 @@ def main():
         asyncio.run(broadcast_refs(message, room_refs, args.markdown))
         return
 
-    asyncio.run(broadcast(message, args.rooms, args.markdown))
+    asyncio.run(broadcast(message, resolve(args.rooms), args.markdown))
 
-
-if __name__ == "__main__":
-    main()
