@@ -1,18 +1,24 @@
-# Create Rooms
+# Create Rooms (`matrix-tools create-rooms`)
 
 Erstellt automatisiert viele gleichartige Matrix-Räume — z.B. 150 Gruppenräume für ein Event — und hängt sie optional direkt in einen bestehenden Space ein.
 
 ## Setup
 
-`config.json` in diesem Ordner anlegen (siehe Haupt-README).
+`config.json` im Daten-Ordner anlegen (siehe Haupt-README).
 
 ## Benutzung
 
 ```
-python matrix_create_rooms.py --count 150 --prefix "Gruppe" --alias-prefix "event-gr" --public --space '!eureSpaceId:matrix.eure-hochschule.de'
+matrix-tools create-rooms --count 150 --prefix "Gruppe" --alias-prefix "event-gr" --public --space '!eureSpaceId:matrix.eure-hochschule.de'
 ```
 
-Das erzeugt z.B. Räume `Gruppe-01` bis `Gruppe-150` mit Aliassen `#event-gr-01` bis `#event-gr-150`.
+Mit Docker:
+
+```
+docker compose run --rm watchdog create-rooms --count 150 --prefix "Gruppe"
+```
+
+Das erzeugt z.B. Räume `Gruppe-001` bis `Gruppe-150` mit Aliassen `#event-gr-001` bis `#event-gr-150`. Die Nummern werden immer auf mindestens zwei Stellen aufgefüllt (`01`), bei dreistelligen Nummern auf drei (`001`).
 
 Optionen:
 
@@ -22,7 +28,8 @@ Optionen:
 - `--space` — Space-ID, in die die Räume eingehängt werden sollen (Alias oder interne ID, beides geht)
 - `--alias-prefix` — wenn gesetzt, bekommt jeder Raum zusätzlich einen Alias
 - `--public` — Räume öffentlich statt invite-only erstellen (Default: privat)
-- `--rooms-out` — Datei, an die die neuen Room-IDs angehängt werden (Default: `rooms.txt`, kompatibel mit `broadcast/` und `sync-members/`)
+- `--rooms-out` — Datei im Daten-Ordner, an die die neuen Room-IDs angehängt werden (Default: `rooms.txt`, direkt nutzbar für `matrix-tools broadcast`)
+- `--config` — andere Zugangsdaten verwenden
 
 Der Ersteller-Account ist automatisch Mitglied jedes erstellten Raums — eine separate Einladung ist nicht nötig, z.B. für spätere Broadcasts.
 

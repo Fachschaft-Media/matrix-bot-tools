@@ -1,13 +1,19 @@
 @echo off
-REM Startet das vereinheitlichte Watchdog-Tool dauerhaft und startet es
-REM automatisch neu, falls es abstuerzt.
+REM Startet den Watchdog (matrix-tools watchdog) dauerhaft und startet ihn
+REM automatisch neu, falls er abstuerzt. Voraussetzung: uv ist installiert
+REM (https://docs.astral.sh/uv/getting-started/installation/).
 
-REM ANPASSEN: Pfad zu deinem Tool-Ordner
-cd /d "C:\matrix-tools\watchdog"
+REM ANPASSEN: Ordner, in dem dieses Repository liegt
+set PROJECT_DIR=C:\matrix-bot-tools
+
+REM ANPASSEN: Daten-Ordner mit config.json und settings.json
+set DATA_DIR=C:\matrix-bot-tools\data
+
+cd /d "%DATA_DIR%"
 
 :loop
 echo === %date% %time%: Watchdog wird gestartet === >> watchdog.log
-python matrix_watchdog.py >> watchdog.log 2>&1
+uv run --project "%PROJECT_DIR%" matrix-tools watchdog >> watchdog.log 2>&1
 echo === %date% %time%: Watchdog beendet, Neustart in 10s === >> watchdog.log
 timeout /t 10 /nobreak >nul
 goto loop

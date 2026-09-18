@@ -1,35 +1,114 @@
 # Matrix-Tools für Hochschulgruppen
 
-Eine Sammlung von Python-Scripts zur Verwaltung großer Matrix/Element-Communities mit vielen Räumen und Mitgliedern — entstanden für die **Erstsemesterwoche (EWO)** und die **Fachschaft Media** der Hochschule Darmstadt, aber generell für jede Fachschaft, jeden AStA oder jede vergleichbare Hochschulgruppe nutzbar.
+Eine Sammlung von Tools zur Verwaltung großer Matrix/Element-Communities mit vielen Räumen und Mitgliedern — entstanden für die **Erstsemesterwoche (EWO)** und die **Fachschaft Media** der Hochschule Darmstadt, aber generell für jede Fachschaft, jeden AStA oder jede vergleichbare Hochschulgruppe nutzbar.
 
-**Empfehlung:** Nutzt für diese Tools nicht euren persönlichen Matrix-Account, sondern das **Funktionskonto eurer Fachschaft** (bzw. ein separates Konto pro Tool) als "Bot"-Account. So bleibt die Automatisierung unabhängig von einzelnen Personen und läuft weiter, auch wenn sich Zuständigkeiten ändern.
+**Empfehlung:** Nutzt für diese Tools nicht euren persönlichen Matrix-Account, sondern das **Funktionskonto eurer Fachschaft** als "Bot"-Account. So bleibt die Automatisierung unabhängig von einzelnen Personen und läuft weiter, auch wenn sich Zuständigkeiten ändern.
 
 ## Was ist hier drin?
 
-| Ordner | Zweck |
-|---|---|
-| [`watchdog/`](watchdog/README.md) | **Empfohlen für Dauerbetrieb:** vereinheitlichtes Tool, kombiniert Wrong-Server-Check + beliebig viele Auto-Invite-Regeln über eine einzige `settings.json` — eine Session, kein Token-Tennis |
-| [`broadcast/`](broadcast/README.md) | Eine Nachricht gleichzeitig an viele Räume schicken (z.B. Ansagen an alle Gruppen-Räume) |
-| [`create-rooms/`](create-rooms/README.md) | Viele gleichartige Räume auf einmal erstellen (z.B. 150 Gruppenräume für ein Event) |
-| [`sync-members/`](sync-members/README.md) | Einzel-Tool: Mitglieder eines Space automatisch in einen anderen Raum einladen (einmalig oder live) |
-| [`wrong-server-watchdog/`](wrong-server-watchdog/README.md) | Einzel-Tool: neue Mitglieder mit falschem Matrix-Server automatisch per DM auf den Fehler hinweisen |
-| [`auth/`](auth/README.md) | Login-Helfer für Hochschul-SSO/OIDC-Server, holt Access- und Refresh-Token |
-| `lib/` | Geteiltes Hilfsmodul (`matrix_auth.py`) für automatischen Token-Refresh, wird von den Dauerlauf-Scripts genutzt |
+Alle Tools sind Unterbefehle von **einem** Programm: `matrix-tools`. Eine Übersicht bekommt ihr jederzeit mit `matrix-tools --help`, die Hilfe zu einem Befehl mit `matrix-tools <befehl> --help`.
 
-Jeder Ordner hat sein eigenes README mit genauer Anleitung. Dieses Haupt-README erklärt nur den gemeinsamen Unterbau.
+| Befehl | Zweck | Anleitung |
+|---|---|---|
+| `matrix-tools login` | Einmaliger Login per Hochschul-SSO, holt Access- und Refresh-Token | [docs/login.md](docs/login.md) |
+| `matrix-tools watchdog` | **Dauerlauf:** Wrong-Server-Check + beliebig viele Auto-Invite-Regeln über eine einzige `settings.json` | [docs/watchdog.md](docs/watchdog.md) |
+| `matrix-tools broadcast` | Eine Nachricht gleichzeitig an viele Räume schicken (z.B. Ansagen an alle Gruppen-Räume) | [docs/broadcast.md](docs/broadcast.md) |
+| `matrix-tools create-rooms` | Viele gleichartige Räume auf einmal erstellen (z.B. 150 Gruppenräume für ein Event) | [docs/create-rooms.md](docs/create-rooms.md) |
+| `matrix-tools sync-members` | Mitglieder eines Space einmalig in einen anderen Raum einladen | [docs/sync-members.md](docs/sync-members.md) |
 
-## Voraussetzungen
+## Der Daten-Ordner
 
-- Python 3.10 oder neuer
-- Abhängigkeiten installieren:
-  ```
-  pip install -r requirements.txt
-  ```
-- Ein Matrix-Account (idealerweise ein Funktionskonto), der in den relevanten Räumen Mitglied ist bzw. die nötigen Rechte hat (Einladen, Senden, o.ä. je nach Tool)
+Alle Tools lesen und schreiben ihre Dateien in **einem** Ordner, dem Daten-Ordner:
+
+| Datei | Inhalt | Vorlage |
+|---|---|---|
+| `config.json` | Zugangsdaten des Bot-Accounts (wird von `matrix-tools login` geschrieben) | [`examples/config.example.json`](examples/config.example.json) |
+| `settings.json` | Regeln für den Watchdog | [`examples/settings.example.json`](examples/settings.example.json) |
+| `rooms.txt` | Raumliste für Broadcasts (wird von `create-rooms` befüllt) | [`examples/rooms.example.txt`](examples/rooms.example.txt) |
+| `notified_wrong_server.json` | Wird vom Watchdog automatisch angelegt | — |
+
+- **Mit Docker** ist der Daten-Ordner `./data` neben der `compose.yml`.
+- **Ohne Docker** ist es der Ordner, in dem ihr den Befehl ausführt. Alternativ könnt ihr ihn über die Umgebungsvariable `MATRIX_TOOLS_DATA_DIR` festlegen.
+
+Alle Dateinamen lassen sich per `--config`, `--settings` oder `--rooms` ändern. Relative Pfade gelten dabei immer relativ zum Daten-Ordner. `config.json`, `settings.json`, `rooms.txt` und `data/` stehen in `.gitignore` und werden **nie** versehentlich eingecheckt.
+
+## Variante 1: Mit Docker (empfohlen für den Dauerbetrieb)
+
+Ihr braucht nur [Docker](https://docs.docker.com/get-docker/) — kein Python, kein Git.
+
+1. Einen neuen Ordner anlegen und darin die [`compose.yml`](compose.yml) aus diesem Repository speichern.
+2. Daneben einen Ordner `data` anlegen und die Vorlage [`examples/settings.example.json`](examples/settings.example.json) als `data/settings.json` hineinlegen und anpassen (siehe [docs/watchdog.md](docs/watchdog.md)).
+3. Einmalig einloggen:
+   ```
+   docker compose run --rm --service-ports watchdog login --homeserver https://matrix.eure-hochschule.de
+   ```
+   Im Terminal erscheint ein Link. Öffnet ihn im Browser und meldet euch mit dem Bot-Account an. Danach liegt die fertige `data/config.json` bereit.
+4. Den Watchdog dauerhaft im Hintergrund starten:
+   ```
+   docker compose up -d
+   ```
+   Er startet automatisch neu, falls er abstürzt oder der Rechner neu startet.
+
+Nützliche Befehle:
+
+```
+docker compose logs -f                      # Ausgabe des Watchdogs live ansehen
+docker compose pull && docker compose up -d # auf die neueste Version aktualisieren
+docker compose down                         # Watchdog stoppen
+```
+
+Die anderen Tools laufen einmalig über denselben Container, z.B.:
+
+```
+docker compose run --rm watchdog broadcast "Wichtige Ansage an alle Gruppen"
+docker compose run --rm watchdog create-rooms --count 20 --prefix "Gruppe"
+docker compose run --rm watchdog sync-members --source '!spaceid' --target '!zielraumid' --dry-run
+```
+
+Ohne Compose geht es genauso mit `docker run`:
+
+```
+docker run --rm -it -v ./data:/data ghcr.io/fachschaft-media/matrix-bot-tools:latest --help
+```
+
+**Fehler "Permission denied" beim Schreiben der `config.json`?** Der Container läuft aus Sicherheitsgründen nicht als root, sondern als Benutzer mit der ID 1000. Legt den `data`-Ordner deshalb selbst an, bevor ihr den Container startet (sonst legt Docker ihn als root an). Falls euer Benutzer eine andere ID hat, hilft `sudo chown -R 1000:1000 data`.
+
+Das Image gibt es unter `ghcr.io/fachschaft-media/matrix-bot-tools` für `linux/amd64` und `linux/arm64` (z.B. Raspberry Pi). `latest` ist der aktuelle Stand von `main`, Versionen wie `0.1.0` entsprechen den Git-Tags `v0.1.0`.
+
+## Variante 2: Ohne Docker (mit uv)
+
+Ihr braucht nur [uv](https://docs.astral.sh/uv/getting-started/installation/). uv lädt die passende Python-Version (3.14) und alle Abhängigkeiten automatisch herunter — Python müsst ihr nicht selbst installieren.
+
+1. Dieses Repository herunterladen (`git clone` oder auf GitHub "Code" → "Download ZIP").
+2. Im Repository-Ordner einmal prüfen, dass alles läuft:
+   ```
+   uv run matrix-tools --help
+   ```
+3. Einen Daten-Ordner anlegen (z.B. `data` im Repository-Ordner, der ist bereits in `.gitignore`), die benötigten Vorlagen aus `examples/` hineinkopieren und anpassen.
+4. Im Daten-Ordner einloggen und loslegen (`--project` zeigt auf den Repository-Ordner):
+   ```
+   cd data
+   uv run --project .. matrix-tools login --homeserver https://matrix.eure-hochschule.de
+   uv run --project .. matrix-tools watchdog --dry-run
+   ```
+
+Tipp: Mit `uv tool install .` (im Repository-Ordner) wird `matrix-tools` dauerhaft installiert. Danach reicht in jedem Ordner einfach `matrix-tools …`.
+
+### Windows-Dauerbetrieb
+
+Im Ordner [`windows/`](windows/) liegen fertige `.bat`-Dateien:
+
+- `start_watchdog.bat` — hält den Watchdog in einer Neustart-Schleife am Laufen und schreibt ein Log
+- `run_sync_members.bat` — einmaliger Mitglieder-Abgleich, z.B. stündlich über den Taskplaner
+
+Oben in der Datei die mit `ANPASSEN` markierten Pfade eintragen. Für den echten Dauerbetrieb (auch nach einem Neustart, ohne offenes Terminal-Fenster):
+
+1. Windows-Aufgabenplanung öffnen
+2. Neue Aufgabe: Trigger "Bei Systemstart", Aktion "Programm starten" → Pfad zur `.bat`-Datei
+3. Unter "Sicherheitsoptionen": "Unabhängig von der Benutzeranmeldung ausführen"
+4. Unter "Einstellungen": "Aufgabe beenden, falls sie länger als..." **deaktivieren** (sonst wird der Dauerlauf beendet)
 
 ## Zugangsdaten: config.json
-
-Alle Scripts lesen ihre Zugangsdaten aus einer `config.json` im jeweiligen Tool-Ordner. Kopiert `config.example.json` (im Hauptordner) in den jeweiligen Tool-Ordner und benennt sie in `config.json` um:
 
 ```
 {
@@ -40,36 +119,23 @@ Alle Scripts lesen ihre Zugangsdaten aus einer `config.json` im jeweiligen Tool-
 }
 ```
 
-`access_token` und `refresh_token` müsst ihr **nicht** manuell eintragen — das übernimmt `auth/get_token.py` für euch (siehe unten). `config.json` steht in `.gitignore` und wird **nie** versehentlich mit eingecheckt.
+Wie ihr an die Zugangsdaten kommt, hängt vom Login-Verfahren eures Matrix-Servers ab:
 
-### Zwei Arten von Matrix-Login
+- **SSO/OIDC-Login** (z.B. wenn eure Hochschule Matrix an ein zentrales Uni-Login gekoppelt hat — erkennbar daran, dass `m.login.password` mit `Invalid login type` fehlschlägt): `matrix-tools login` schickt euch per Browser durch den SSO-Login und schreibt Access- **und** Refresh-Token automatisch in die `config.json`. Mit dem Refresh-Token holt sich der Watchdog danach **selbst** neue Tokens, ganz ohne manuelles Eingreifen. Details: [docs/login.md](docs/login.md).
+- **Klassisches Passwort-Login:** Access Token einmalig über Element holen (Einstellungen → Hilfe & Info → Erweitert → Access Token) und zusammen mit `homeserver` und `user_id` manuell in die `config.json` eintragen. Läuft er irgendwann ab, müsst ihr ihn manuell erneuern.
 
-Wie ihr an Zugangsdaten kommt, hängt vom Login-Verfahren eures Matrix-Servers ab:
+**Mehrere Dauerläufe gleichzeitig?** Jeder dauerhaft laufende Prozess braucht eine **eigene** `config.json` mit einer **eigenen** Login-Session (per `matrix-tools login --config <eigene-datei>.json`). Teilen sich zwei Prozesse dieselbe Session, macht ein Token-Refresh im einen den Token im anderen ungültig ("Token-Tennis"). Am einfachsten: alles in **einem** `matrix-tools watchdog` mit mehreren Regeln kombinieren.
 
-- **Klassisches Passwort-Login:** Access Token einmalig über Element holen (Einstellungen → Hilfe & Info → Erweitert → Access Token) und manuell in `config.json` eintragen. Läuft ggf. irgendwann ab, dann Token manuell erneuern.
-- **SSO/OIDC-Login** (z.B. wenn eure Hochschule Matrix an ein zentrales Uni-Login gekoppelt hat — erkennbar daran, dass `m.login.password` mit `Invalid login type` fehlschlägt): Nutzt `auth/get_token.py`, das euch per Browser durch den SSO-Login schickt und automatisch Access- **und** Refresh-Token holt. Mit dem Refresh-Token können sich die Dauerlauf-Scripts (die beiden Watchdogs) danach **selbst** neue Tokens holen, ganz ohne manuelles Eingreifen — wichtig, weil SSO/OIDC-Server Access Tokens oft bewusst kurzlebig ausstellen.
+## Mitentwickeln
 
-**Wichtig, wenn mehrere Dauerlauf-Scripts gleichzeitig laufen:** Jedes Script braucht eine **eigene** `config.json` mit einer **eigenen** Login-Session (eigener `device_id`). Teilen sich zwei Scripts dieselbe Session, invalidiert ein Token-Refresh im einen Script den gerade aktiven Token im anderen — das führt zu einer Endlosschleife aus gegenseitigen Refreshes ("Token-Tennis"). Für jedes Dauerlauf-Script also mit `--config <eigene-datei>.json` eine eigene Session anlegen.
+```
+uv sync                      # Abhängigkeiten inkl. Entwicklungs-Tools installieren
+uv run ruff format           # Code formatieren
+uv run ruff check            # Linting
+uv run pyright               # Typprüfung
+```
 
-**Einfacher: das vereinheitlichte [`watchdog/`](watchdog/README.md)-Tool nutzen.** Statt mehrere Einzel-Scripts parallel laufen zu lassen, kombiniert es alles in einem Prozess mit einer Session — das Token-Tennis-Problem tritt dann gar nicht erst auf.
-
-## Einmalig laufende Scripts vs. Dauerlauf-Scripts
-
-Zwei Kategorien von Tools hier:
-
-- **Einmalig/periodisch** (`matrix_broadcast.py`, `matrix_create_rooms.py`, `matrix_sync_members.py`): Werden einmal ausgeführt und beenden sich danach. Eignen sich für manuellen Aufruf oder für den Taskplaner/Cron mit einem Zeit-Trigger (z.B. stündlich).
-- **Dauerlauf** (`matrix_sync_members_watchdog.py`, `matrix_wrong_server_watchdog.py`): Laufen permanent im Hintergrund und reagieren live auf Events (z.B. neue Beitritte). Eignen sich für den Taskplaner mit Trigger "Bei Systemstart" + Auto-Neustart-Schleife (siehe die `.bat`-Dateien in den jeweiligen Ordnern).
-
-## Windows-Dauerbetrieb einrichten
-
-Für die beiden Watchdog-Scripts liegt je eine `.bat`-Datei bei, die das Script in einer Neustart-Schleife hält (falls es mal abstürzt). Für den echten Dauerbetrieb (auch nach Server-Neustart, ohne offenes Terminal-Fenster):
-
-1. Windows-Aufgabenplanung öffnen
-2. Neue Aufgabe: Trigger "Bei Systemstart", Aktion "Programm starten" → Pfad zur jeweiligen `.bat`-Datei
-3. Unter "Sicherheitsoptionen": "Unabhängig von der Benutzeranmeldung ausführen"
-4. Unter "Einstellungen": "Aufgabe beenden, falls sie länger als..." **deaktivieren** (sonst wird der Dauerlauf gekillt)
-
-Details dazu auch im jeweiligen Tool-README.
+Die GitHub-Action prüft bei jedem Push und Pull Request Formatierung, Linting, Typen und die SonarQube-Cloud-Analyse. Nur wenn alles grün ist, wird das Docker-Image von `main` und von `v*`-Tags nach `ghcr.io` veröffentlicht. Welche Ruff-Regeln bewusst deaktiviert sind und wie ihr sie schrittweise wieder aktiviert: [docs/code-qualitaet.md](docs/code-qualitaet.md).
 
 ## Lizenz / Weiterverwendung
 

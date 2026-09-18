@@ -1,18 +1,16 @@
-# Watchdog (vereinheitlicht)
+# Watchdog (`matrix-tools watchdog`)
 
-**Empfohlener Einstiegspunkt**, wenn ihr mehrere Automatisierungen dauerhaft laufen lassen wollt: EIN Script, EINE Session, alles über eine `settings.json` konfiguriert — statt mehrere separate Scripts mit vielen CLI-Flags zu starten.
-
-Kombiniert die Funktionen von `wrong-server-watchdog/` und `sync-members/*_watchdog.py` in einem einzigen Dauerlauf-Prozess:
+**Empfohlener Einstiegspunkt** für den Dauerbetrieb: EIN Prozess, EINE Session, alles über eine `settings.json` konfiguriert. Kombiniert in einem einzigen Dauerlauf-Prozess:
 
 - **Wrong-Server-Check:** neue Beitritte mit falschem Matrix-Server werden automatisch per DM informiert
 - **Auto-Invite-Regeln:** beliebig viele Regeln der Form "wer Raum/Räume X beitritt, wird automatisch in Raum Y eingeladen" — funktioniert für Space→Raum genauso wie für ausgewählte Kanäle→Space
 
-**Bonus gegenüber den einzelnen Scripts:** Da alles über eine einzige Matrix-Session läuft, gibt es kein "Token-Tennis" (gegenseitiges Aussperren beim Token-Refresh) zwischen mehreren parallel laufenden Prozessen mehr — das Problem verschwindet einfach, weil es nur noch einen Prozess gibt.
+Da alles über eine einzige Matrix-Session läuft, gibt es kein "Token-Tennis" (gegenseitiges Aussperren beim Token-Refresh) zwischen mehreren parallel laufenden Prozessen.
 
 ## Setup
 
-1. `config.json` in diesem Ordner anlegen (Zugangsdaten, siehe Haupt-README). Bei SSO/OIDC-Servern: `auth/get_token.py` verwenden.
-2. `settings.example.json` nach `settings.json` kopieren und anpassen:
+1. `config.json` im Daten-Ordner anlegen (Zugangsdaten, siehe Haupt-README). Bei SSO/OIDC-Servern: [`matrix-tools login`](login.md) verwenden.
+2. [`examples/settings.example.json`](../examples/settings.example.json) als `settings.json` in den Daten-Ordner kopieren und anpassen:
 
 ```json
 {
@@ -46,18 +44,29 @@ Kombiniert die Funktionen von `wrong-server-watchdog/` und `sync-members/*_watch
 
 ## Benutzung
 
+Mit Docker (dauerhaft im Hintergrund, siehe Haupt-README):
 ```
-python matrix_watchdog.py
+docker compose up -d
+```
+
+Ohne Docker (im Daten-Ordner):
+```
+matrix-tools watchdog
 ```
 
 Custom-Pfade:
 ```
-python matrix_watchdog.py --config config.json --settings settings.json
+matrix-tools watchdog --config config.json --settings settings.json
 ```
 
 Erst testen:
 ```
-python matrix_watchdog.py --dry-run
+matrix-tools watchdog --dry-run
+```
+
+Mit Docker testen:
+```
+docker compose run --rm watchdog watchdog --dry-run
 ```
 
 ## Ablauf beim Start
@@ -69,8 +78,5 @@ python matrix_watchdog.py --dry-run
 
 ## Dauerbetrieb einrichten
 
-`start_watchdog.bat` anpassen (Pfad) und über die Windows-Aufgabenplanung mit Trigger "Bei Systemstart" einrichten — Details im Haupt-README. Startet automatisch neu, falls der Prozess mal abstürzt.
-
-## Wann stattdessen die Einzel-Scripts nutzen?
-
-Die separaten Scripts in `wrong-server-watchdog/` und `sync-members/` bleiben bestehen für einfache Fälle, bei denen ihr nur EINE Automatisierung braucht und keine Lust auf eine Settings-Datei habt — reiner CLI-Aufruf reicht dann. Sobald ihr mehrere Automatisierungen kombiniert oder öfter Regeln anpasst, ist `matrix_watchdog.py` die bessere Wahl.
+- **Mit Docker:** `docker compose up -d` — der Container startet automatisch neu, falls der Prozess abstürzt oder der Rechner neu startet.
+- **Windows ohne Docker:** [`windows/start_watchdog.bat`](../windows/start_watchdog.bat) anpassen (Pfade) und über die Windows-Aufgabenplanung mit Trigger "Bei Systemstart" einrichten — Details im Haupt-README. Die `.bat`-Datei startet den Prozess automatisch neu, falls er mal abstürzt.
