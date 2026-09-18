@@ -346,6 +346,7 @@ name = "matrix-bot-tools"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "markdown" },
     { name = "matrix-nio" },
     { name = "requests" },
@@ -361,6 +362,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "markdown", specifier = ">=3.10.3" },
     { name = "matrix-nio", specifier = ">=0.26.0" },
     { name = "requests", specifier = ">=2.34.2" },

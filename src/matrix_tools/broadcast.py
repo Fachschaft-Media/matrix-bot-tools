@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-"""
-Matrix Broadcast-Script
-========================
+r"""Matrix Broadcast.
+
 Schickt eine Nachricht gleichzeitig an mehrere Matrix-Räume (z.B. alle
 Gruppen-Räume der Campus Rallye).
 
@@ -34,43 +32,35 @@ BENUTZUNG
         --alias-range '#gruppe-001:matrix.eure-hochschule.de..#gruppe-150:matrix.eure-hochschule.de'
 """
 
-from __future__ import annotations
-
 import asyncio
-import json
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from nio import AsyncClient, LoginResponse, RoomSendResponse
+import markdown
+from aiohttp import ClientError
+from nio import AsyncClient, LocalProtocolError, RoomResolveAliasResponse, RoomSendResponse
 
+from matrix_tools.config import MatrixConfig, create_client, load_config
 from matrix_tools.paths import resolve
 
-CONFIG_PATH = resolve("config.json")
+if TYPE_CHECKING:
+    import argparse
+    from pathlib import Path
 
 
-def load_config() -> dict:
-    """Lädt Homeserver-URL und Access Token aus config.json."""
-    if not CONFIG_PATH.exists():
-        print(f"❌ Keine config.json gefunden unter {CONFIG_PATH}")
-        print("   Lege eine config.json an mit folgendem Inhalt:")
-        print(
-            json.dumps(
-                {
-                    "homeserver": "https://matrix.h-da.de",
-                    "user_id": "@nutzername:matrix.h-da.de",
-                    "access_token": "DEIN_ACCESS_TOKEN",
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
-        sys.exit(1)
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+class AliasResolutionError(Exception):
+    """Ein Raum-Alias konnte nicht in eine Room-ID aufgelöst werden."""
+
+    def __init__(self, alias: str, reason: object) -> None:
+        """Speichert Alias und Fehlerursache in der Fehlermeldung."""
+        super().__init__(f"Alias {alias} konnte nicht aufgelöst werden: {reason}")
 
 
 def load_rooms(path: Path) -> list[str]:
     """Lädt Room-IDs oder Aliase aus einer Textdatei, eine Zeile pro Raum.
-    Zeilen mit '//' am Anfang gelten als Kommentar."""
+
+    Zeilen mit '//' am Anfang gelten als Kommentar.
+    """
     if not path.exists():
         print(f"❌ Keine Raumliste gefunden unter {path}")
         print("   Lege eine rooms.txt an, eine Zeile pro Raum, z.B.:")
@@ -78,91 +68,93 @@ def load_rooms(path: Path) -> list[str]:
         print("   #gruppe-001:matrix.h-da.de")
         sys.exit(1)
 
-    rooms = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("//"):
-            continue
-        rooms.append(line)
+    rooms: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line and not line.startswith("//"):
+            rooms.append(line)
     return rooms
 
 
-async def resolve_room(client: AsyncClient, room_ref: str) -> str:
-    """Gibt die Room-ID zurück. Löst Aliase (#...) automatisch auf."""
-    if room_ref.startswith("#"):
-        resp = await client.room_resolve_alias(room_ref)
-        if hasattr(resp, "room_id"):
-            return resp.room_id
-        raise RuntimeError(f"Alias konnte nicht aufgelöst werden: {resp}")
-    return room_ref
+def expand_alias_range(spec: str) -> list[str]:
+    """Erzeugt Aliase aus einer Range wie '#gruppe-001:server..#gruppe-150:server'.
+
+    Wirft ValueError, wenn die Range nicht dem erwarteten Format entspricht.
+    """
+    start_alias, end_alias = spec.split("..")
+    prefix_start, server = start_alias.rsplit(":", 1)
+    prefix, num_start = prefix_start.rsplit("-", 1)
+    _, num_end = end_alias.rsplit(":", 1)[0].rsplit("-", 1)
+    width = len(num_start)
+    return [
+        f"{prefix}-{str(i).zfill(width)}:{server}" for i in range(int(num_start), int(num_end) + 1)
+    ]
 
 
-async def broadcast(message: str, rooms_path: Path, use_markdown: bool) -> None:
-    room_ids = load_rooms(rooms_path)
-    if not room_ids:
-        print("❌ Raumliste ist leer.")
-        return
-    await broadcast_refs(message, room_ids, use_markdown)
-
-
-async def broadcast_refs(message: str, room_ids: list[str], use_markdown: bool) -> None:
-    config = load_config()
-
-    print(f"📡 Sende an {len(room_ids)} Räume...\n")
-
-    client = AsyncClient(config["homeserver"], config["user_id"])
-    client.access_token = config["access_token"]
-    client.user_id = config["user_id"]
-
+def build_content(message: str, *, use_markdown: bool) -> dict[str, str]:
+    """Baut den Nachrichteninhalt, optional mit per Markdown erzeugtem HTML."""
     content = {"msgtype": "m.text", "body": message}
     if use_markdown:
-        # Sehr simple Markdown -> HTML Konvertierung für Fett/Kursiv/Listen.
-        # Für komplexere Formatierung ggf. das Paket "markdown" nutzen.
-        try:
-            import markdown as md
+        content["format"] = "org.matrix.custom.html"
+        content["formatted_body"] = markdown.markdown(message)
+    return content
 
-            html = md.markdown(message)
-            content["format"] = "org.matrix.custom.html"
-            content["formatted_body"] = html
-        except ImportError:
-            print("⚠️  Paket 'markdown' nicht installiert, sende als Plaintext.")
 
-    success, failed = [], []
+async def resolve_room(client: AsyncClient, room_ref: str) -> str:
+    """Gibt die Room-ID zurück und löst Aliase (#...) automatisch auf."""
+    if not room_ref.startswith("#"):
+        return room_ref
+    resp = await client.room_resolve_alias(room_ref)
+    if isinstance(resp, RoomResolveAliasResponse):
+        return resp.room_id
+    raise AliasResolutionError(room_ref, resp)
 
-    for room_ref in room_ids:
-        try:
-            room_id = await resolve_room(client, room_ref)
-        except Exception as e:
-            failed.append((room_ref, f"Alias-Auflösung fehlgeschlagen: {e}"))
-            print(f"  ❌ {room_ref} -> Alias-Auflösung fehlgeschlagen: {e}")
-            continue
 
-        try:
-            resp = await client.room_send(
-                room_id=room_id,
-                message_type="m.room.message",
-                content=content,
-            )
-            if isinstance(resp, RoomSendResponse):
-                success.append(room_ref)
-                print(f"  ✅ {room_ref}")
-            else:
-                failed.append((room_ref, str(resp)))
-                print(f"  ❌ {room_ref} -> {resp}")
-        except Exception as e:
-            failed.append((room_ref, str(e)))
-            print(f"  ❌ {room_ref} -> {e}")
+async def send_to_room(client: AsyncClient, room_ref: str, content: dict[str, str]) -> str | None:
+    """Sendet die Nachricht an einen Raum. Gibt None bei Erfolg, sonst die Fehlermeldung zurück."""
+    try:
+        room_id = await resolve_room(client, room_ref)
+        resp = await client.room_send(
+            room_id=room_id,
+            message_type="m.room.message",
+            content=content,
+        )
+    except (AliasResolutionError, ClientError, LocalProtocolError, TimeoutError) as e:
+        return str(e)
+    return None if isinstance(resp, RoomSendResponse) else str(resp)
+
+
+async def broadcast(
+    config: MatrixConfig, message: str, room_refs: list[str], *, use_markdown: bool
+) -> None:
+    """Sendet die Nachricht an alle angegebenen Räume und gibt eine Zusammenfassung aus."""
+    print(f"📡 Sende an {len(room_refs)} Räume...\n")
+
+    client = create_client(config)
+    content = build_content(message, use_markdown=use_markdown)
+    success: list[str] = []
+    failed: list[tuple[str, str]] = []
+
+    for room_ref in room_refs:
+        error = await send_to_room(client, room_ref, content)
+        if error is None:
+            success.append(room_ref)
+            print(f"  ✅ {room_ref}")
+        else:
+            failed.append((room_ref, error))
+            print(f"  ❌ {room_ref} -> {error}")
 
     await client.close()
 
     print(f"\n📊 Fertig: {len(success)} erfolgreich, {len(failed)} fehlgeschlagen.")
     if failed:
         print("\nFehlgeschlagene Räume:")
-        for room_id, err in failed:
-            print(f"  - {room_id}: {err}")
+        for room_ref, err in failed:
+            print(f"  - {room_ref}: {err}")
 
 
-def add_arguments(parser):
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Registriert die Argumente von ``matrix-tools broadcast``."""
     parser.add_argument("message", nargs="?", help="Die zu sendende Nachricht.")
     parser.add_argument("--file", help="Nachricht aus Textdatei lesen statt Argument.")
     parser.add_argument(
@@ -189,10 +181,8 @@ def add_arguments(parser):
     )
 
 
-def run(args):
-    global CONFIG_PATH
-    CONFIG_PATH = resolve(args.config)
-
+def run(args: argparse.Namespace) -> None:
+    """Liest Nachricht und Raumliste ein und startet den Broadcast."""
     if args.file:
         message = resolve(args.file).read_text(encoding="utf-8").strip()
     elif args.message:
@@ -202,17 +192,18 @@ def run(args):
         sys.exit(2)
 
     if args.alias_range:
-        start_alias, end_alias = args.alias_range.split("..")
-        # Erwartet Format '#prefix-NNN:server', extrahiert prefix, Startzahl, Endzahl
-        prefix_start, server = start_alias.rsplit(":", 1)
-        prefix, num_start = prefix_start.rsplit("-", 1)
-        _, num_end = end_alias.rsplit(":", 1)[0].rsplit("-", 1)
-        width = len(num_start)
-        room_refs = [
-            f"{prefix}-{str(i).zfill(width)}:{server}"
-            for i in range(int(num_start), int(num_end) + 1)
-        ]
-        asyncio.run(broadcast_refs(message, room_refs, args.markdown))
+        try:
+            room_refs = expand_alias_range(args.alias_range)
+        except ValueError:
+            print(f"❌ Ungültige Alias-Range: {args.alias_range}")
+            print("   Erwartetes Format: '#gruppe-001:server..#gruppe-150:server'")
+            sys.exit(2)
+    else:
+        room_refs = load_rooms(resolve(args.rooms))
+
+    if not room_refs:
+        print("❌ Raumliste ist leer.")
         return
 
-    asyncio.run(broadcast(message, resolve(args.rooms), args.markdown))
+    config = load_config(resolve(args.config))
+    asyncio.run(broadcast(config, message, room_refs, use_markdown=args.markdown))

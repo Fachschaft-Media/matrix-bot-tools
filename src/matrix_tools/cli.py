@@ -1,14 +1,33 @@
 """Kommandozeilen-Einstiegspunkt ``matrix-tools``."""
 
-from __future__ import annotations
-
 import argparse
+import io
 import sys
+from typing import TYPE_CHECKING, Protocol
 
 from matrix_tools import broadcast, create_rooms, login, sync_members, watchdog
 
-COMMANDS = {
-    "login": (login, "Per SSO-Login Access- und Refresh-Token holen und in config.json speichern."),
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+class Command(Protocol):
+    """Schnittstelle, die jedes Befehls-Modul bereitstellt."""
+
+    def add_arguments(self, parser: argparse.ArgumentParser) -> None:
+        """Registriert die Argumente des Befehls."""
+        ...
+
+    def run(self, args: argparse.Namespace) -> None:
+        """Führt den Befehl aus."""
+        ...
+
+
+COMMANDS: dict[str, tuple[Command, str]] = {
+    "login": (
+        login,
+        "Per SSO-Login Access- und Refresh-Token holen und in config.json speichern.",
+    ),
     "watchdog": (
         watchdog,
         "Dauerlauf: Wrong-Server-Check und Auto-Invite-Regeln aus settings.json.",
@@ -22,23 +41,33 @@ COMMANDS = {
 }
 
 
-def main(argv=None):
-    if hasattr(sys.stdout, "reconfigure"):
-        # Windows-Konsolen nutzen oft cp1252 und können sonst keine Emojis ausgeben.
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+def _force_utf8_output() -> None:
+    """Erzwingt UTF-8-Ausgabe, da Windows-Konsolen sonst an Emojis scheitern (cp1252)."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Baut den Argument-Parser mit allen Unterbefehlen."""
     parser = argparse.ArgumentParser(
         prog="matrix-tools",
-        description="Matrix-Tools für Hochschulgruppen. Hilfe zu einem Befehl: matrix-tools <befehl> --help",
+        description=(
+            "Matrix-Tools für Hochschulgruppen. Hilfe zu einem Befehl: matrix-tools <befehl> --help"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<befehl>", required=True)
-    for name, (module, help_text) in COMMANDS.items():
+    for name, (command, help_text) in COMMANDS.items():
         sub = subparsers.add_parser(name, help=help_text, description=help_text)
-        module.add_arguments(sub)
-        sub.set_defaults(func=module.run)
+        command.add_arguments(sub)
+        sub.set_defaults(func=command.run)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Startet den über die Kommandozeile gewählten Befehl."""
+    _force_utf8_output()
+    args = build_parser().parse_args(argv)
     try:
         args.func(args)
     except KeyboardInterrupt:

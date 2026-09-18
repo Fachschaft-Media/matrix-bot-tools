@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-"""
-Matrix SSO-Login
-================
+"""Matrix SSO-Login.
+
 Holt sich per SSO-Browser-Login (Uni-Anmeldung) einen frischen Access Token
 UND einen Refresh Token, und schreibt beides automatisch in die config.json.
 
@@ -23,60 +21,75 @@ Muss pro config-Datei nur EINMALIG ausgeführt werden (oder wenn der Refresh
 Token doch mal ungültig werden sollte).
 """
 
-from __future__ import annotations
-
-import argparse
+import contextlib
 import json
 import os
 import sys
 import threading
 import webbrowser
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
 
 from matrix_tools.paths import resolve
 
+if TYPE_CHECKING:
+    import argparse
+    from pathlib import Path
+
 IN_DOCKER_ENV = "MATRIX_TOOLS_IN_DOCKER"
 CALLBACK_PORT = 8765
 CALLBACK_URL = f"http://127.0.0.1:{CALLBACK_PORT}/callback"
+LOGIN_TIMEOUT_SECONDS = 300
+REQUEST_TIMEOUT_SECONDS = 30
 
-login_token_holder = {}
+SUCCESS_PAGE = (
+    "<html><body style='font-family:sans-serif;padding:40px'>"
+    "<h2>✅ Erfolgreich angemeldet!</h2>"
+    "<p>Du kannst dieses Fenster jetzt schließen und zum Terminal zurückkehren.</p>"
+    "</body></html>"
+)
+FAILURE_PAGE = (
+    "<html><body style='font-family:sans-serif;padding:40px'>"
+    "<h2>❌ Kein Login-Token erhalten</h2>"
+    "<p>Bitte Terminal prüfen.</p>"
+    "</body></html>"
+)
+
+
+class CallbackServer(HTTPServer):
+    """Lokaler HTTP-Server, der den Login-Token aus dem SSO-Redirect abfängt."""
+
+    login_token: str | None = None
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        params = parse_qs(parsed.query)
+    """Beantwortet den SSO-Redirect und merkt sich den Login-Token."""
+
+    def do_GET(self) -> None:
+        """Liest den loginToken aus der Callback-URL."""
+        params = parse_qs(urlparse(self.path).query)
         token = params.get("loginToken", [None])[0]
 
-        self.send_response(200)
+        self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
 
-        if token:
-            login_token_holder["token"] = token
-            self.wfile.write(
-                "<html><body style='font-family:sans-serif;padding:40px'>"
-                "<h2>✅ Erfolgreich angemeldet!</h2>"
-                "<p>Du kannst dieses Fenster jetzt schließen und zum Terminal zurückkehren.</p>"
-                "</body></html>".encode("utf-8")
-            )
+        if token and isinstance(self.server, CallbackServer):
+            self.server.login_token = token
+            self.wfile.write(SUCCESS_PAGE.encode())
         else:
-            self.wfile.write(
-                "<html><body style='font-family:sans-serif;padding:40px'>"
-                "<h2>❌ Kein Login-Token erhalten</h2>"
-                "<p>Bitte Terminal prüfen.</p>"
-                "</body></html>".encode("utf-8")
-            )
+            self.wfile.write(FAILURE_PAGE.encode())
 
-    def log_message(self, format, *args):
-        pass  # Terminal nicht mit HTTP-Server-Logs zuspammen
+    def log_message(self, *_args: object, **_kwargs: object) -> None:
+        """Unterdrückt HTTP-Server-Logs, damit das Terminal übersichtlich bleibt."""
 
 
-def add_arguments(parser):
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Registriert die Argumente von ``matrix-tools login``."""
     parser.add_argument(
         "--config",
         default="config.json",
@@ -84,69 +97,90 @@ def add_arguments(parser):
     )
     parser.add_argument(
         "--homeserver",
-        help="URL eures Matrix-Servers, z.B. https://matrix.eure-hochschule.de "
-        "(Default: der Wert aus der bestehenden config-Datei).",
+        help=(
+            "URL eures Matrix-Servers, z.B. https://matrix.eure-hochschule.de "
+            "(Default: der Wert aus der bestehenden config-Datei)."
+        ),
     )
     parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Browser nicht automatisch öffnen, nur den Login-Link ausgeben "
-        "(im Docker-Container automatisch aktiv).",
+        help=(
+            "Browser nicht automatisch öffnen, nur den Login-Link ausgeben "
+            "(im Docker-Container automatisch aktiv)."
+        ),
     )
 
 
-def run(args):
+def _read_existing_config(config_path: Path) -> dict[str, Any]:
+    """Liest eine bestehende config-Datei, damit vorhandene Werte erhalten bleiben."""
+    if config_path.exists():
+        with contextlib.suppress(json.JSONDecodeError):
+            config: dict[str, Any] = json.loads(config_path.read_text(encoding="utf-8"))
+            return config
+    return {}
+
+
+def _wait_for_login_token(sso_url: str, *, in_docker: bool, open_browser: bool) -> str | None:
+    """Startet den Callback-Server, öffnet ggf. den Browser und wartet auf den Login-Token."""
+    # Im Container muss der Callback-Server über die Port-Weiterleitung von
+    # außen erreichbar sein, daher dort auf allen Interfaces lauschen.
+    bind_host = "0.0.0.0" if in_docker else "127.0.0.1"  # noqa: S104
+    server = CallbackServer((bind_host, CALLBACK_PORT), CallbackHandler)
+    server_thread = threading.Thread(target=server.handle_request, daemon=True)
+    server_thread.start()
+
+    if open_browser:
+        webbrowser.open(sso_url)
+
+    print(f"⏳ Warte auf Login im Browser (max. {LOGIN_TIMEOUT_SECONDS // 60} Minuten)...")
+    server_thread.join(timeout=LOGIN_TIMEOUT_SECONDS)
+    server.server_close()
+    return server.login_token
+
+
+def run(args: argparse.Namespace) -> None:
+    """Führt den SSO-Login durch und speichert die Tokens in der config-Datei."""
     config_path = resolve(args.config)
     in_docker = os.environ.get(IN_DOCKER_ENV) == "1"
+    config = _read_existing_config(config_path)
 
-    config = {}
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
-
-    homeserver = (args.homeserver or config.get("homeserver", "")).rstrip("/")
+    homeserver = str(args.homeserver or config.get("homeserver", "")).rstrip("/")
     if not homeserver:
         print("❌ Kein Homeserver bekannt. Bitte mit --homeserver angeben, z.B.:")
         print("   matrix-tools login --homeserver https://matrix.eure-hochschule.de")
         sys.exit(1)
 
+    sso_url = f"{homeserver}/_matrix/client/v3/login/sso/redirect?redirectUrl={CALLBACK_URL}"
     print("🔐 Matrix SSO-Login wird gestartet...")
     print(f"   Ziel-Datei: {config_path}")
     print("   Falls sich der Browser nicht automatisch öffnet, rufe manuell auf:")
-    sso_url = f"{homeserver}/_matrix/client/v3/login/sso/redirect?redirectUrl={CALLBACK_URL}"
     print(f"   {sso_url}\n")
 
-    # Im Container muss der Callback-Server von außen (Port-Weiterleitung) erreichbar sein.
-    bind_host = "0.0.0.0" if in_docker else "127.0.0.1"
-    server = HTTPServer((bind_host, CALLBACK_PORT), CallbackHandler)
-    server_thread = threading.Thread(target=server.handle_request, daemon=True)
-    server_thread.start()
-
-    if not (args.no_browser or in_docker):
-        webbrowser.open(sso_url)
-
-    print("⏳ Warte auf Login im Browser (max. 5 Minuten)...")
-    server_thread.join(timeout=300)
-
-    login_token = login_token_holder.get("token")
+    login_token = _wait_for_login_token(
+        sso_url, in_docker=in_docker, open_browser=not (args.no_browser or in_docker)
+    )
     if not login_token:
         print("❌ Kein Login-Token erhalten (Timeout oder Abbruch). Bitte nochmal versuchen.")
         sys.exit(1)
 
     print("✅ Login-Token erhalten. Tausche gegen Access Token...")
 
-    resp = requests.post(
-        f"{homeserver}/_matrix/client/v3/login",
-        json={
-            "type": "m.login.token",
-            "token": login_token,
-            "refresh_token": True,  # bittet den Server explizit um einen Refresh Token
-        },
-    )
+    try:
+        resp = requests.post(
+            f"{homeserver}/_matrix/client/v3/login",
+            json={
+                "type": "m.login.token",
+                "token": login_token,
+                "refresh_token": True,  # bittet den Server explizit um einen Refresh Token
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        print(f"❌ Server nicht erreichbar: {e}")
+        sys.exit(1)
 
-    if resp.status_code != 200:
+    if resp.status_code != HTTPStatus.OK:
         print(f"❌ Token-Austausch fehlgeschlagen: {resp.status_code} {resp.text}")
         sys.exit(1)
 
@@ -161,12 +195,8 @@ def run(args):
         sys.exit(1)
 
     if not refresh_token:
-        print(
-            "⚠️  Server hat KEINEN refresh_token ausgestellt. Auto-Refresh wird nicht möglich sein -"
-        )
-        print(
-            "   die Dauerlauf-Scripts werden dann weiterhin regelmäßig manuell erneuert werden müssen."
-        )
+        print("⚠️  Server hat KEINEN refresh_token ausgestellt. Auto-Refresh ist nicht möglich -")
+        print("   der Token muss dann regelmäßig manuell erneuert werden.")
 
     config["homeserver"] = homeserver
     config["user_id"] = user_id
@@ -180,6 +210,4 @@ def run(args):
 
     print(f"\n✅ {config_path.name} aktualisiert für {user_id}.")
     if refresh_token:
-        print(
-            "✅ Refresh Token gespeichert - die Dauerlauf-Scripts können sich jetzt selbst erneuern."
-        )
+        print("✅ Refresh Token gespeichert - der Watchdog kann sich jetzt selbst erneuern.")
