@@ -30,3 +30,30 @@ dev = [
     "types-markdown>=3.10.2.20260712",
     "types-requests>=2.33.0.20260906",
 ]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Bewusst deaktivierte Regeln - Begründung und Anleitung zum schrittweisen
+# Wieder-Aktivieren: docs/code-qualitaet.md
+ignore = [
+    # Konflikte mit dem Ruff-Formatter
+    "COM812",
+    "ISC001",
+    # Sich widersprechende Docstring-Regeln (D211/D212 bleiben aktiv)
+    "D203",
+    "D213",
+    # print() ist die Benutzeroberfläche dieser CLI-Tools
+    "T201",
+]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"

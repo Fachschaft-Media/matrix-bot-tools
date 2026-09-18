@@ -61,6 +61,7 @@ NOTIFIED_PATH = resolve("notified_wrong_server.json")
 # Config / Settings laden
 # ─────────────────────────────────────────────────────────────────────────
 
+
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
         print(f"❌ Keine config.json gefunden unter {CONFIG_PATH}")
@@ -95,6 +96,7 @@ def save_notified(notified: set[str]) -> None:
 # Wrong-Server-Check
 # ─────────────────────────────────────────────────────────────────────────
 
+
 def domain_of(user_id: str) -> str:
     return user_id.split(":", 1)[1] if ":" in user_id else ""
 
@@ -106,8 +108,8 @@ def build_wrong_server_message(guide_url: str, sender_name: str) -> str:
         "mit dem falschen Server angemeldet. Bitte melde dich nochmal mit dem richtigen "
         "Hochschul-Server an, hier ist erklärt wie:\n"
         f"{guide_url}\n\n"
-        "Wichtig: den richtigen Server auswählen und auf \"Anmelden\" klicken, NICHT "
-        "\"Registrieren\" - falls ihr als Teil der Hochschule schon automatisch einen "
+        'Wichtig: den richtigen Server auswählen und auf "Anmelden" klicken, NICHT '
+        '"Registrieren" - falls ihr als Teil der Hochschule schon automatisch einen '
         "Account habt.\n\n"
         "Liebe Grüße,\n"
         f"{sender_name}"
@@ -134,6 +136,7 @@ async def send_dm(client: AsyncClient, user_id: str, message: str) -> bool:
 # Auto-Invite-Regeln
 # ─────────────────────────────────────────────────────────────────────────
 
+
 async def get_member_status(client: AsyncClient, room_id: str) -> dict[str, str]:
     """Gibt {user_id: membership} zurück - 'join', 'invite', 'leave' oder 'ban'."""
     resp = await client.room_get_state(room_id)
@@ -151,12 +154,18 @@ async def get_member_status(client: AsyncClient, room_id: str) -> dict[str, str]
     return status
 
 
-async def invite_if_needed(client: AsyncClient, target_room: str, user_id: str, dry_run: bool) -> None:
+async def invite_if_needed(
+    client: AsyncClient, target_room: str, user_id: str, dry_run: bool
+) -> None:
     status = await get_member_status(client, target_room)
     current = status.get(user_id)
     if current in ("join", "invite", "leave", "ban"):
-        label = {"join": "bereits Mitglied", "invite": "bereits eingeladen",
-                 "leave": "hat abgelehnt/ist ausgetreten", "ban": "gebannt"}[current]
+        label = {
+            "join": "bereits Mitglied",
+            "invite": "bereits eingeladen",
+            "leave": "hat abgelehnt/ist ausgetreten",
+            "ban": "gebannt",
+        }[current]
         print(f"   ⏭️  {user_id} übersprungen ({label}).")
         return
     if dry_run:
@@ -209,6 +218,7 @@ async def initial_invite_pass(client: AsyncClient, rule: dict, global_dry_run: b
 # Haupt-Loop
 # ─────────────────────────────────────────────────────────────────────────
 
+
 async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
     config = load_config()
     notified = load_notified()
@@ -235,8 +245,10 @@ async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
         all_watched_rooms |= set(rule["source_rooms"])
 
     print(f"📋 Konfiguration geladen:")
-    print(f"   Wrong-Server-Check: {'aktiv' if ws_enabled else 'inaktiv'}"
-          f"{' (' + str(len(ws_watch_rooms)) + ' Räume)' if ws_enabled else ''}")
+    print(
+        f"   Wrong-Server-Check: {'aktiv' if ws_enabled else 'inaktiv'}"
+        f"{' (' + str(len(ws_watch_rooms)) + ' Räume)' if ws_enabled else ''}"
+    )
     print(f"   Auto-Invite-Regeln: {len(invite_rules)}")
     print(f"   Insgesamt überwachte Räume: {len(all_watched_rooms)}\n")
 
@@ -266,7 +278,9 @@ async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
         if ws_enabled and room.room_id in ws_watch_rooms and user_id not in notified:
             domain = domain_of(user_id)
             if domain != ws_correct_domain:
-                print(f"🚨 {user_id} ist mit falschem Server ({domain}) in {room.room_id} beigetreten.")
+                print(
+                    f"🚨 {user_id} ist mit falschem Server ({domain}) in {room.room_id} beigetreten."
+                )
                 if ws_dry_run:
                     print(f"   🧪 DRY RUN - würde DM senden.")
                 else:
@@ -280,7 +294,9 @@ async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
         for rule in invite_rules:
             if room.room_id in rule["source_rooms"]:
                 dry_run = global_dry_run or rule.get("dry_run", False)
-                print(f"👋 Neuer Beitritt in {room.room_id}: {user_id} (Regel → {rule['target_room']})")
+                print(
+                    f"👋 Neuer Beitritt in {room.room_id}: {user_id} (Regel → {rule['target_room']})"
+                )
                 await invite_if_needed(client, rule["target_room"], user_id, dry_run)
 
     client.add_event_callback(on_member_event, RoomMemberEvent)
@@ -301,15 +317,18 @@ async def run_watchdog(settings: dict, global_dry_run: bool) -> None:
 
 def add_arguments(parser):
     parser.add_argument(
-        "--config", default="config.json",
+        "--config",
+        default="config.json",
         help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
     )
     parser.add_argument(
-        "--settings", default="settings.json",
+        "--settings",
+        default="settings.json",
         help="Pfad zur settings.json mit den Verhaltensregeln (Default: settings.json).",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="GLOBAL nichts tatsächlich senden/einladen, egal was in settings.json steht.",
     )
 

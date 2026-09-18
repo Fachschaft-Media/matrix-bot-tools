@@ -183,7 +183,8 @@ def add_arguments(parser):
         ),
     )
     parser.add_argument(
-        "--config", default="config.json",
+        "--config",
+        default="config.json",
         help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
     )
 
@@ -215,4 +216,3 @@ def run(args):
         return
 
     asyncio.run(broadcast(message, resolve(args.rooms), args.markdown))
-

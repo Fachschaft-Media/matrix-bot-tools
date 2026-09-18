@@ -100,9 +100,11 @@ async def sync_members(source_room: str, target_room: str, dry_run: bool) -> Non
     already_invited = {u for u, m in target_status.items() if m == "invite"}
     declined_or_left = {u for u, m in target_status.items() if m in ("leave", "ban")}
 
-    print(f"   {len(already_joined)} bereits Mitglied, "
-          f"{len(already_invited)} bereits eingeladen (noch offen), "
-          f"{len(declined_or_left)} abgelehnt/ausgetreten.\n")
+    print(
+        f"   {len(already_joined)} bereits Mitglied, "
+        f"{len(already_invited)} bereits eingeladen (noch offen), "
+        f"{len(declined_or_left)} abgelehnt/ausgetreten.\n"
+    )
 
     already_covered = already_joined | already_invited | declined_or_left
     to_invite = source_members - already_covered
@@ -154,7 +156,8 @@ def add_arguments(parser):
         help="Nur anzeigen, wer eingeladen würde, ohne tatsächlich einzuladen.",
     )
     parser.add_argument(
-        "--config", default="config.json",
+        "--config",
+        default="config.json",
         help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
     )
 
@@ -164,4 +167,3 @@ def run(args):
     CONFIG_PATH = resolve(args.config)
 
     asyncio.run(sync_members(args.source, args.target, args.dry_run))
-

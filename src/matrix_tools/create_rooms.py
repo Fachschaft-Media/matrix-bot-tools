@@ -142,8 +142,12 @@ async def create_rooms(
 
 
 def add_arguments(parser):
-    parser.add_argument("--count", type=int, required=True, help="Anzahl der zu erstellenden Räume.")
-    parser.add_argument("--prefix", default="Gruppe", help="Namens-Präfix, z.B. 'Gruppe' -> 'Gruppe 01'.")
+    parser.add_argument(
+        "--count", type=int, required=True, help="Anzahl der zu erstellenden Räume."
+    )
+    parser.add_argument(
+        "--prefix", default="Gruppe", help="Namens-Präfix, z.B. 'Gruppe' -> 'Gruppe 01'."
+    )
     parser.add_argument("--start", type=int, default=1, help="Startnummer (Default: 1).")
     parser.add_argument("--space", help="Space-ID, in die die Räume eingehängt werden sollen.")
     parser.add_argument(
@@ -161,7 +165,8 @@ def add_arguments(parser):
         help="Räume öffentlich statt invite-only erstellen (Default: privat).",
     )
     parser.add_argument(
-        "--config", default="config.json",
+        "--config",
+        default="config.json",
         help="Pfad zur config.json mit den Zugangsdaten (Default: config.json).",
     )
 
@@ -183,4 +188,3 @@ def run(args):
             public=args.public,
         )
     )
-

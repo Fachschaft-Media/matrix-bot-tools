@@ -85,13 +85,13 @@ def add_arguments(parser):
     parser.add_argument(
         "--homeserver",
         help="URL eures Matrix-Servers, z.B. https://matrix.eure-hochschule.de "
-             "(Default: der Wert aus der bestehenden config-Datei).",
+        "(Default: der Wert aus der bestehenden config-Datei).",
     )
     parser.add_argument(
         "--no-browser",
         action="store_true",
         help="Browser nicht automatisch öffnen, nur den Login-Link ausgeben "
-             "(im Docker-Container automatisch aktiv).",
+        "(im Docker-Container automatisch aktiv).",
     )
 
 
@@ -161,8 +161,12 @@ def run(args):
         sys.exit(1)
 
     if not refresh_token:
-        print("⚠️  Server hat KEINEN refresh_token ausgestellt. Auto-Refresh wird nicht möglich sein -")
-        print("   die Dauerlauf-Scripts werden dann weiterhin regelmäßig manuell erneuert werden müssen.")
+        print(
+            "⚠️  Server hat KEINEN refresh_token ausgestellt. Auto-Refresh wird nicht möglich sein -"
+        )
+        print(
+            "   die Dauerlauf-Scripts werden dann weiterhin regelmäßig manuell erneuert werden müssen."
+        )
 
     config["homeserver"] = homeserver
     config["user_id"] = user_id
@@ -176,5 +180,6 @@ def run(args):
 
     print(f"\n✅ {config_path.name} aktualisiert für {user_id}.")
     if refresh_token:
-        print("✅ Refresh Token gespeichert - die Dauerlauf-Scripts können sich jetzt selbst erneuern.")
-
+        print(
+            "✅ Refresh Token gespeichert - die Dauerlauf-Scripts können sich jetzt selbst erneuern."
+        )

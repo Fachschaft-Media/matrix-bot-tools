@@ -9,10 +9,16 @@ from matrix_tools import broadcast, create_rooms, login, sync_members, watchdog
 
 COMMANDS = {
     "login": (login, "Per SSO-Login Access- und Refresh-Token holen und in config.json speichern."),
-    "watchdog": (watchdog, "Dauerlauf: Wrong-Server-Check und Auto-Invite-Regeln aus settings.json."),
+    "watchdog": (
+        watchdog,
+        "Dauerlauf: Wrong-Server-Check und Auto-Invite-Regeln aus settings.json.",
+    ),
     "broadcast": (broadcast, "Eine Nachricht gleichzeitig an viele Räume schicken."),
     "create-rooms": (create_rooms, "Viele gleichartige Räume auf einmal erstellen."),
-    "sync-members": (sync_members, "Mitglieder eines Space/Raums einmalig in einen anderen Raum einladen."),
+    "sync-members": (
+        sync_members,
+        "Mitglieder eines Space/Raums einmalig in einen anderen Raum einladen.",
+    ),
 }
 
 

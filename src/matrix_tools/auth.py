@@ -42,12 +42,16 @@ def refresh_access_token(config_path: Path, client) -> bool:
 
     if resp.status_code != 200:
         print(f"❌ Token-Refresh fehlgeschlagen ({resp.status_code}): {resp.text}")
-        print("   Refresh Token ist vermutlich auch abgelaufen. Bitte 'matrix-tools login' erneut ausführen.")
+        print(
+            "   Refresh Token ist vermutlich auch abgelaufen. Bitte 'matrix-tools login' erneut ausführen."
+        )
         return False
 
     data = resp.json()
     new_access_token = data.get("access_token")
-    new_refresh_token = data.get("refresh_token", refresh_token)  # manche Server geben denselben zurück
+    new_refresh_token = data.get(
+        "refresh_token", refresh_token
+    )  # manche Server geben denselben zurück
 
     if not new_access_token:
         print(f"❌ Kein access_token in der Refresh-Antwort: {data}")
