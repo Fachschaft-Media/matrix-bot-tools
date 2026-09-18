@@ -8,6 +8,7 @@ settings.json
 !settings.example.json
 
 # Laufzeit-Daten
+data/
 *.log
 notified_users.json
 notified_wrong_server.json

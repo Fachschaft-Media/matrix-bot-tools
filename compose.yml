@@ -1,0 +1,17 @@
+# Startet den Watchdog dauerhaft im Hintergrund:
+#   docker compose up -d
+# Einmaliger SSO-Login (Link im Terminal im Browser öffnen):
+#   docker compose run --rm --service-ports watchdog login --homeserver https://matrix.eure-hochschule.de
+# Andere Befehle, z.B. ein Broadcast:
+#   docker compose run --rm watchdog broadcast "Wichtige Ansage an alle Gruppen"
+#
+# Alle Dateien (config.json, settings.json, rooms.txt, ...) liegen im Ordner ./data
+services:
+  watchdog:
+    image: ghcr.io/fachschaft-media/matrix-bot-tools:latest
+    command: ["watchdog"]
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8765:8765"
