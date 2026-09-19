@@ -202,6 +202,14 @@ class Watchdog:
         self.notified_path = notified_path
         self.notified = load_notified(notified_path)
 
+    def refresh_token(self) -> bool:
+        """Erneuert den Access Token und setzt ihn im laufenden Client."""
+        access_token = refresh_access_token(self.config_path)
+        if access_token is None:
+            return False
+        self.client.access_token = access_token
+        return True
+
     async def send_dm(self, user_id: str, message: str) -> bool:
         """Erstellt einen DM-Raum mit user_id und schickt dort die Nachricht."""
         resp = await self.client.room_create(
@@ -244,7 +252,7 @@ class Watchdog:
         """Liest die Mitglieder eines Raums, erneuert bei Bedarf einmalig den Token."""
         resp = await self.client.joined_members(room_id)
         if not isinstance(resp, JoinedMembersResponse):
-            if is_token_error(resp) and refresh_access_token(self.config_path, self.client):
+            if is_token_error(resp) and self.refresh_token():
                 resp = await self.client.joined_members(room_id)
             if not isinstance(resp, JoinedMembersResponse):
                 print(f"   ❌ Konnte {room_id} nicht lesen: {resp}")
@@ -326,11 +334,7 @@ class Watchdog:
 
         print("🔄 Initialer Live-Sync...")
         resp = await self.client.sync(timeout=SYNC_TIMEOUT_MS)
-        if (
-            isinstance(resp, SyncError)
-            and is_token_error(resp)
-            and refresh_access_token(self.config_path, self.client)
-        ):
+        if isinstance(resp, SyncError) and is_token_error(resp) and self.refresh_token():
             await self.client.sync(timeout=SYNC_TIMEOUT_MS)
         print("✅ Bereit. Warte auf neue Beitritte...\n")
 
@@ -345,7 +349,7 @@ class Watchdog:
             if not is_token_error(resp):
                 print(f"⚠️  Sync-Fehler: {resp}. Warte {SYNC_RETRY_SECONDS}s...")
                 await asyncio.sleep(SYNC_RETRY_SECONDS)
-            elif not refresh_access_token(self.config_path, self.client):
+            elif not self.refresh_token():
                 print(
                     "❌ Token-Refresh fehlgeschlagen. "
                     f"Warte {REFRESH_RETRY_SECONDS}s und versuche erneut..."

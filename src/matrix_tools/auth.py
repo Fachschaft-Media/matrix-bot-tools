@@ -1,8 +1,8 @@
 """Automatischer Token-Refresh für den Dauerlauf.
 
 Erneuert den Access Token über den gespeicherten Refresh Token, wenn der Server
-'M_UNKNOWN_TOKEN' meldet. Aktualisiert sowohl den laufenden Client als auch die
-config.json auf der Platte.
+'M_UNKNOWN_TOKEN' meldet, und speichert ihn in der config.json. Den neuen Token
+im laufenden Client zu setzen ist Sache des Aufrufers.
 
 Setzt voraus, dass die config.json einen 'refresh_token' enthält - den bekommst
 du über 'matrix-tools login' (einmaliger SSO-Login).
@@ -12,33 +12,32 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import requests
+from nio import ErrorResponse
 
 from matrix_tools.config import read_config, save_config
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nio import AsyncClient
-
 REQUEST_TIMEOUT_SECONDS = 30
 
 
-def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
-    """Holt per refresh_token einen neuen access_token und aktualisiert Client und config.json.
+def refresh_access_token(config_path: Path) -> str | None:
+    """Holt per refresh_token einen neuen access_token und speichert ihn in der config.json.
 
-    Gibt True bei Erfolg zurück, False wenn kein refresh_token vorhanden ist
-    oder der Refresh fehlschlägt.
+    Gibt den neuen access_token zurück, oder None, wenn kein refresh_token
+    vorhanden ist oder der Refresh fehlschlägt.
     """
     config = read_config(config_path)
     if not config:
         print(f"❌ {config_path} nicht gefunden oder unlesbar, kann Token nicht erneuern.")
-        return False
+        return None
 
     refresh_token = config.get("refresh_token")
 
     if not refresh_token:
         print("❌ Kein refresh_token in config.json. Bitte 'matrix-tools login' ausführen.")
-        return False
+        return None
 
     print("🔄 Access Token abgelaufen - hole neuen per Refresh Token...")
 
@@ -50,7 +49,7 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
         )
     except requests.RequestException as e:
         print(f"❌ Token-Refresh fehlgeschlagen (Netzwerkfehler): {e}")
-        return False
+        return None
 
     if resp.status_code != HTTPStatus.OK:
         print(f"❌ Token-Refresh fehlgeschlagen ({resp.status_code}): {resp.text}")
@@ -58,7 +57,7 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
             "   Refresh Token ist vermutlich auch abgelaufen. "
             "Bitte 'matrix-tools login' erneut ausführen."
         )
-        return False
+        return None
 
     data = resp.json()
     new_access_token = data.get("access_token")
@@ -67,10 +66,7 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
 
     if not new_access_token:
         print(f"❌ Kein access_token in der Refresh-Antwort: {data}")
-        return False
-
-    # Client live aktualisieren, damit der nächste API-Call sofort klappt
-    client.access_token = new_access_token
+        return None
 
     # config.json dauerhaft aktualisieren, damit ein Neustart nicht wieder
     # von vorne anfangen muss
@@ -79,10 +75,11 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
     save_config(config_path, config)
 
     print("✅ Neuer Access Token erfolgreich geholt und gespeichert.")
-    return True
+    return new_access_token
 
 
 def is_token_error(resp: object) -> bool:
     """Prüft, ob eine nio-Response ein abgelaufener/ungültiger Token ist."""
-    message = str(resp)
-    return "M_UNKNOWN_TOKEN" in message or "next_batch" in message or "required property" in message
+    return isinstance(resp, ErrorResponse) and (
+        resp.status_code == "M_UNKNOWN_TOKEN" or resp.soft_logout
+    )
