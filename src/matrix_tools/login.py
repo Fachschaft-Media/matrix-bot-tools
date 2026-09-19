@@ -27,12 +27,12 @@ import threading
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
 
-from matrix_tools.config import read_config, save_config
+from matrix_tools.config import is_http_url, read_config, save_config
 from matrix_tools.paths import resolve
 
 if TYPE_CHECKING:
@@ -128,18 +128,26 @@ def _wait_for_login_token(sso_url: str, *, in_docker: bool, open_browser: bool) 
     return server.login_token
 
 
+def _resolve_homeserver(homeserver_arg: str | None, config: dict[str, Any]) -> str:
+    """Nimmt --homeserver bzw. den Wert aus der config und beendet bei ungültigem Wert."""
+    homeserver = str(homeserver_arg or config.get("homeserver", "")).rstrip("/")
+    if not homeserver:
+        print("❌ Kein Homeserver bekannt. Bitte mit --homeserver angeben, z.B.:")
+        print("   matrix-tools login --homeserver https://matrix.eure-hochschule.de")
+        sys.exit(1)
+    if not is_http_url(homeserver):
+        print(f"❌ Der Homeserver muss mit https:// beginnen, ist aber '{homeserver}'.")
+        sys.exit(1)
+    return homeserver
+
+
 def run(args: argparse.Namespace) -> None:
     """Führt den SSO-Login durch und speichert die Tokens in der config-Datei."""
     config_path = resolve(args.config)
     in_docker = os.environ.get(IN_DOCKER_ENV) == "1"
     config = read_config(config_path)
 
-    homeserver = str(args.homeserver or config.get("homeserver", "")).rstrip("/")
-    if not homeserver:
-        print("❌ Kein Homeserver bekannt. Bitte mit --homeserver angeben, z.B.:")
-        print("   matrix-tools login --homeserver https://matrix.eure-hochschule.de")
-        sys.exit(1)
-
+    homeserver = _resolve_homeserver(args.homeserver, config)
     sso_url = f"{homeserver}/_matrix/client/v3/login/sso/redirect?redirectUrl={CALLBACK_URL}"
     print("🔐 Matrix SSO-Login wird gestartet...")
     print(f"   Ziel-Datei: {config_path}")
@@ -179,8 +187,8 @@ def run(args: argparse.Namespace) -> None:
     user_id = data.get("user_id")
     expires_in_ms = data.get("expires_in_ms")
 
-    if not access_token:
-        print(f"❌ Kein access_token in der Antwort: {data}")
+    if not access_token or not user_id:
+        print(f"❌ Kein access_token bzw. keine user_id in der Antwort: {data}")
         sys.exit(1)
 
     if not refresh_token:

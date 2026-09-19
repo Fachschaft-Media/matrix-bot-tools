@@ -30,13 +30,13 @@ BENUTZUNG
 
 import asyncio
 import json
-import sys
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
+from matrix_tools.config import ConfigError, read_json_file
 from matrix_tools.invites import members_of, reconcile_invites
 from matrix_tools.paths import resolve
 from matrix_tools.session import MatrixError, MatrixSession, open_session
+from matrix_tools.settings import InviteRule, WatchdogSettings, load_settings
 
 if TYPE_CHECKING:
     import argparse
@@ -48,105 +48,26 @@ REFRESH_RETRY_SECONDS = 60
 SYNC_RETRY_SECONDS = 10
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Settings
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class WrongServerSettings:
-    """Einstellungen des Wrong-Server-Checks."""
-
-    enabled: bool
-    watch_rooms: frozenset[str]
-    correct_domain: str
-    message: str
-    dry_run: bool
-
-
-@dataclass(frozen=True)
-class InviteRule:
-    """Eine Auto-Invite-Regel: Beitritte in source_rooms werden nach target_room eingeladen."""
-
-    source_rooms: frozenset[str]
-    target_room: str
-    dry_run: bool
-
-
-@dataclass(frozen=True)
-class WatchdogSettings:
-    """Alle Verhaltensregeln des Watchdogs aus der settings.json."""
-
-    wrong_server: WrongServerSettings
-    invite_rules: list[InviteRule] = field(default_factory=list)
-
-    @property
-    def watched_rooms(self) -> frozenset[str]:
-        """Alle überwachten Räume (Wrong-Server + alle Invite-Regel-Quellen)."""
-        rooms = set(self.wrong_server.watch_rooms)
-        for rule in self.invite_rules:
-            rooms |= rule.source_rooms
-        return frozenset(rooms)
-
-
-def build_wrong_server_message(guide_url: str, sender_name: str) -> str:
-    """Baut die DM für Personen, die sich mit dem falschen Server angemeldet haben."""
-    return (
-        "Heyy, voll cool, dass du gejoint bist! 🎉\n\n"
-        "Das ist am Anfang alles etwas kompliziert: Es sieht so aus, als hättest du dich "
-        "mit dem falschen Server angemeldet. Bitte melde dich nochmal mit dem richtigen "
-        "Hochschul-Server an, hier ist erklärt wie:\n"
-        f"{guide_url}\n\n"
-        'Wichtig: den richtigen Server auswählen und auf "Anmelden" klicken, NICHT '
-        '"Registrieren" - falls ihr als Teil der Hochschule schon automatisch einen '
-        "Account habt.\n\n"
-        "Liebe Grüße,\n"
-        f"{sender_name}"
-    )
-
-
-def parse_settings(raw: dict[str, Any], *, global_dry_run: bool) -> WatchdogSettings:
-    """Wandelt den Inhalt der settings.json in typisierte Einstellungen um."""
-    wrong_server = raw.get("wrong_server", {})
-    ws_settings = WrongServerSettings(
-        enabled=wrong_server.get("enabled", False),
-        watch_rooms=frozenset(wrong_server.get("watch_rooms", [])),
-        correct_domain=wrong_server.get("correct_domain", ""),
-        message=build_wrong_server_message(
-            wrong_server.get("guide_url", "https://example.edu/matrix-anleitung"),
-            wrong_server.get("sender_name", "deine Fachschaft"),
-        ),
-        dry_run=global_dry_run or wrong_server.get("dry_run", False),
-    )
-    rules = [
-        InviteRule(
-            source_rooms=frozenset(rule["source_rooms"]),
-            target_room=rule["target_room"],
-            dry_run=global_dry_run or rule.get("dry_run", False),
-        )
-        for rule in raw.get("auto_invite_rules", [])
-    ]
-    return WatchdogSettings(wrong_server=ws_settings, invite_rules=rules)
-
-
-def load_settings(settings_path: Path) -> dict[str, Any]:
-    """Lädt die settings.json und beendet das Programm mit einem Hinweis, falls sie fehlt."""
-    if not settings_path.exists():
-        print(f"❌ Keine settings.json gefunden unter {settings_path}")
-        print("   Kopiere examples/settings.example.json nach settings.json und passe sie an.")
-        sys.exit(1)
-    settings: dict[str, Any] = json.loads(settings_path.read_text(encoding="utf-8"))
-    return settings
-
-
 def load_notified(notified_path: Path) -> set[str]:
-    """Lädt die Liste bereits per DM informierter Nutzer:innen."""
+    """Lädt die Liste bereits per DM informierter Nutzer:innen.
+
+    Wirft ConfigError, falls die Datei kaputt ist - sonst würden alle bereits
+    Informierten erneut angeschrieben und die Liste überschrieben.
+    """
     if not notified_path.exists():
         return set()
-    try:
-        return set(json.loads(notified_path.read_text(encoding="utf-8")))
-    except json.JSONDecodeError:
-        return set()
+    raw = read_json_file(notified_path, missing_hint="")
+    if not isinstance(raw, list) or not all(isinstance(u, str) for u in raw):
+        raise ConfigError(
+            notified_path,
+            [
+                (
+                    'muss eine Liste von User-IDs sein, z.B. ["@name:server"]. Datei reparieren '
+                    "oder löschen (dann werden bereits Informierte ggf. erneut angeschrieben)."
+                )
+            ],
+        )
+    return set(cast("list[str]", raw))
 
 
 def save_notified(notified_path: Path, notified: set[str]) -> None:
@@ -322,12 +243,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Startet den Watchdog im Dauerlauf."""
     config_path = resolve(args.config)
-    settings = parse_settings(load_settings(resolve(args.settings)), global_dry_run=args.dry_run)
+    settings = load_settings(resolve(args.settings), global_dry_run=args.dry_run)
+    notified_path = resolve(NOTIFIED_FILE)
+    load_notified(notified_path)  # kaputte Datei schon vor dem Verbinden melden
 
     async def main() -> None:
         # Die Sitzung erst innerhalb der Event-Loop öffnen.
         async with open_session(config_path, auto_refresh=True) as session:
-            watchdog = Watchdog(session, settings, config_path, resolve(NOTIFIED_FILE))
+            watchdog = Watchdog(session, settings, config_path, notified_path)
             await watchdog.run_forever()
 
     asyncio.run(main())

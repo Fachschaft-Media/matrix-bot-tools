@@ -101,13 +101,12 @@ async def broadcast(
     config_path: Path, message: str, room_refs: list[str], *, use_markdown: bool
 ) -> None:
     """Sendet die Nachricht an alle angegebenen Räume und gibt eine Zusammenfassung aus."""
-    print(f"📡 Sende an {len(room_refs)} Räume...\n")
-
     content = build_content(message, use_markdown=use_markdown)
     success: list[str] = []
     failed: list[tuple[str, str]] = []
 
     async with open_session(config_path) as session:
+        print(f"📡 Sende an {len(room_refs)} Räume...\n")
         for room_ref in room_refs:
             try:
                 room_id = await resolve_room(session, room_ref)
@@ -157,7 +156,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Liest Nachricht und Raumliste ein und startet den Broadcast."""
     if args.file:
-        message = resolve(args.file).read_text(encoding="utf-8").strip()
+        message_path = resolve(args.file)
+        try:
+            message = message_path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"❌ Nachrichtendatei {message_path} kann nicht gelesen werden: {e}")
+            sys.exit(2)
+        if not message:
+            print(f"❌ Nachrichtendatei {message_path} ist leer.")
+            sys.exit(2)
     elif args.message:
         message = args.message
     else:

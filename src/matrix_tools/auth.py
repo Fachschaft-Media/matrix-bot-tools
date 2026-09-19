@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import requests
 from nio import ErrorResponse
 
-from matrix_tools.config import read_config, save_config
+from matrix_tools.config import ConfigError, load_config, save_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,9 +28,10 @@ def refresh_access_token(config_path: Path) -> str | None:
     Gibt den neuen access_token zurück, oder None, wenn kein refresh_token
     vorhanden ist oder der Refresh fehlschlägt.
     """
-    config = read_config(config_path)
-    if not config:
-        print(f"❌ {config_path} nicht gefunden oder unlesbar, kann Token nicht erneuern.")
+    try:
+        config = load_config(config_path)
+    except ConfigError as e:
+        print(f"❌ Kann Token nicht erneuern. {e}")
         return None
 
     refresh_token = config.get("refresh_token")
@@ -70,9 +71,10 @@ def refresh_access_token(config_path: Path) -> str | None:
 
     # config.json dauerhaft aktualisieren, damit ein Neustart nicht wieder
     # von vorne anfangen muss
-    config["access_token"] = new_access_token
-    config["refresh_token"] = new_refresh_token
-    save_config(config_path, config)
+    save_config(
+        config_path,
+        {**config, "access_token": new_access_token, "refresh_token": new_refresh_token},
+    )
 
     print("✅ Neuer Access Token erfolgreich geholt und gespeichert.")
     return new_access_token

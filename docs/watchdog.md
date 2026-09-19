@@ -41,6 +41,9 @@ Da alles über eine einzige Matrix-Session läuft, gibt es kein "Token-Tennis" (
 - `auto_invite_rules` kann leer (`[]`) sein oder beliebig viele Regeln enthalten
 - Jede Regel hat eigene `source_rooms` (Liste, auch mit nur einem Eintrag) und genau ein `target_room`
 - Pro Regel und beim Wrong-Server-Check kann `dry_run` einzeln gesetzt werden — oder global per `--dry-run`-Flag beim Start (überschreibt alle einzelnen Einstellungen)
+- Räume immer als Room-ID (`!...`) angeben, nicht als Alias (`#...`) — auch bei nur einem Raum als Liste in eckigen Klammern
+- Ist der Wrong-Server-Check aktiv, sind `watch_rooms`, `correct_domain` und `guide_url` Pflicht
+- Die Datei wird beim Start vollständig geprüft: unbekannte Schlüssel (z.B. Tippfehler wie `dryrun`), falsche Typen (`"true"` statt `true`) oder Aliase statt Room-IDs brechen den Start mit einer Liste aller Probleme ab. `_comment` ist überall als Kommentar erlaubt
 
 ## Benutzung
 
@@ -83,7 +86,7 @@ docker compose run --rm watchdog watchdog --dry-run
 
 ## Fehlerbehebung
 
-Der Watchdog beendet sich bei Fehlern **nie** selbst: jeder Fehler wird ausgegeben, danach läuft er weiter bzw. versucht es erneut. Ein abgelaufener Access Token wird automatisch per Refresh Token erneuert. Nur eine fehlende `config.json` oder `settings.json` beim Start beendet den Prozess.
+Der Watchdog beendet sich bei Fehlern **nie** selbst: jeder Fehler wird ausgegeben, danach läuft er weiter bzw. versucht es erneut. Ein abgelaufener Access Token wird automatisch per Refresh Token erneuert. Nur eine fehlende oder fehlerhafte `config.json`, `settings.json` oder `notified_wrong_server.json` beendet den Prozess beim Start, mit einer Liste aller gefundenen Probleme.
 
 Fehlermeldungen haben immer die Form `❌ <Aktion> fehlgeschlagen - <Fehlercode>: <Meldung des Servers>`. Der Fehlercode sagt, was schiefging:
 

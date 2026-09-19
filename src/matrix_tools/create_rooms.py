@@ -103,6 +103,7 @@ async def create_rooms(config_path: Path, plan: RoomPlan, rooms_out: Path) -> No
 
     try:
         async with open_session(config_path) as session:
+            print(f"🏗️  Erstelle {plan.count} Räume '{plan.prefix}-{plan.numbers()[0]}' ff...\n")
             for number in plan.numbers():
                 name = f"{plan.prefix}-{number}"
                 try:
@@ -167,5 +168,4 @@ def run(args: argparse.Namespace) -> None:
         alias_prefix=args.alias_prefix,
         public=args.public,
     )
-    print(f"🏗️  Erstelle {plan.count} Räume '{plan.prefix}-{plan.numbers()[0]}' ff...\n")
     asyncio.run(create_rooms(resolve(args.config), plan, resolve(args.rooms_out)))
