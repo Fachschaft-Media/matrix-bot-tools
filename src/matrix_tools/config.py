@@ -1,4 +1,4 @@
-"""Lesen und Schreiben der Zugangsdaten (config.json), Erstellen des Matrix-Clients.
+"""Lesen und Schreiben der Zugangsdaten (config.json).
 
 Einzige Stelle im Projekt, die die config.json anfasst - login, auth und alle
 Befehle gehen über dieses Modul.
@@ -7,8 +7,6 @@ Befehle gehen über dieses Modul.
 import json
 import sys
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
-
-from nio import AsyncClient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -49,11 +47,3 @@ def load_config(config_path: Path) -> MatrixConfig:
 def save_config(config_path: Path, config: Mapping[str, Any]) -> None:
     """Schreibt die Zugangsdaten in die config.json."""
     config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def create_client(config: MatrixConfig) -> AsyncClient:
-    """Erstellt einen angemeldeten Matrix-Client aus den Zugangsdaten."""
-    client = AsyncClient(config["homeserver"], config["user_id"])
-    client.access_token = config["access_token"]
-    client.user_id = config["user_id"]
-    return client

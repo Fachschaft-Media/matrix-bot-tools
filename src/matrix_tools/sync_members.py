@@ -26,61 +26,46 @@ BENUTZUNG
 """
 
 import asyncio
+import sys
 from typing import TYPE_CHECKING
 
-from aiohttp import ClientError
-from nio import AsyncClient, JoinedMembersResponse, LocalProtocolError, RoomInviteResponse
-
-from matrix_tools.config import MatrixConfig, create_client, load_config
-from matrix_tools.members import get_member_status
 from matrix_tools.paths import resolve
+from matrix_tools.session import MatrixError, MatrixSession, open_session
 
 if TYPE_CHECKING:
     import argparse
+    from pathlib import Path
 
 
 async def invite_all(
-    client: AsyncClient, target_room: str, user_ids: set[str]
+    session: MatrixSession, target_room: str, user_ids: set[str]
 ) -> tuple[list[str], list[tuple[str, str]]]:
     """Lädt alle user_ids in target_room ein und gibt (erfolgreich, fehlgeschlagen) zurück."""
     success: list[str] = []
     failed: list[tuple[str, str]] = []
     for user_id in sorted(user_ids):
         try:
-            resp = await client.room_invite(target_room, user_id)
-        except (ClientError, LocalProtocolError, TimeoutError) as e:
+            await session.invite(target_room, user_id)
+        except MatrixError as e:
             failed.append((user_id, str(e)))
             print(f"  ❌ {user_id} -> {e}")
             continue
-        if isinstance(resp, RoomInviteResponse):
-            success.append(user_id)
-            print(f"  ✅ {user_id}")
-        else:
-            failed.append((user_id, str(resp)))
-            print(f"  ❌ {user_id} -> {resp}")
+        success.append(user_id)
+        print(f"  ✅ {user_id}")
     return success, failed
 
 
-async def compute_invites(
-    client: AsyncClient, source_room: str, target_room: str
-) -> set[str] | None:
+async def compute_invites(session: MatrixSession, source_room: str, target_room: str) -> set[str]:
     """Ermittelt, wer aus dem Quellraum neu in den Zielraum eingeladen werden müsste.
 
-    Gibt None zurück, falls einer der Räume nicht gelesen werden kann.
+    Wirft MatrixError, falls einer der Räume nicht gelesen werden kann.
     """
     print(f"🔍 Lese Mitglieder von {source_room}...")
-    source_resp = await client.joined_members(source_room)
-    if not isinstance(source_resp, JoinedMembersResponse):
-        print(f"❌ Konnte Quellraum nicht lesen: {source_resp}")
-        return None
-    source_members = {m.user_id for m in source_resp.members}
+    source_members = await session.joined_members(source_room)
     print(f"   {len(source_members)} Mitglieder gefunden.\n")
 
     print(f"🔍 Lese Status im Zielraum {target_room}...")
-    target_status = await get_member_status(client, target_room)
-    if not target_status:
-        print("❌ Konnte Zielraum nicht lesen (leer oder Fehler).")
-        return None
+    target_status = await session.member_status(target_room)
 
     already_joined = {u for u, m in target_status.items() if m == "join"}
     already_invited = {u for u, m in target_status.items() if m == "invite"}
@@ -106,31 +91,34 @@ async def compute_invites(
 
 
 async def sync_members(
-    config: MatrixConfig, source_room: str, target_room: str, *, dry_run: bool
-) -> None:
-    """Lädt alle Mitglieder von source_room, die noch fehlen, in target_room ein."""
-    client = create_client(config)
-    to_invite = await compute_invites(client, source_room, target_room)
+    config_path: Path, source_room: str, target_room: str, *, dry_run: bool
+) -> bool:
+    """Lädt alle Mitglieder von source_room, die noch fehlen, in target_room ein.
 
-    if to_invite is None:
-        await client.close()
-        return
+    Gibt False zurück, falls die Räume nicht gelesen werden konnten.
+    """
+    async with open_session(config_path) as session:
+        try:
+            to_invite = await compute_invites(session, source_room, target_room)
+        except MatrixError as e:
+            print(f"❌ {e}")
+            print("   Es wurde niemand eingeladen.")
+            return False
 
-    if dry_run:
-        print("🧪 DRY RUN - es wird niemand eingeladen. Würde einladen:")
-        for user_id in sorted(to_invite):
-            print(f"   - {user_id}")
-        await client.close()
-        return
+        if dry_run:
+            print("🧪 DRY RUN - es wird niemand eingeladen. Würde einladen:")
+            for user_id in sorted(to_invite):
+                print(f"   - {user_id}")
+            return True
 
-    success, failed = await invite_all(client, target_room, to_invite)
-    await client.close()
+        success, failed = await invite_all(session, target_room, to_invite)
 
     print(f"\n📊 Fertig: {len(success)} eingeladen, {len(failed)} fehlgeschlagen.")
     if failed:
         print("\nFehlgeschlagen:")
         for user_id, err in failed:
             print(f"  - {user_id}: {err}")
+    return True
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -151,5 +139,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> None:
     """Führt den einmaligen Mitglieder-Abgleich aus."""
-    config = load_config(resolve(args.config))
-    asyncio.run(sync_members(config, args.source, args.target, dry_run=args.dry_run))
+    ok = asyncio.run(
+        sync_members(resolve(args.config), args.source, args.target, dry_run=args.dry_run)
+    )
+    if not ok:
+        sys.exit(1)

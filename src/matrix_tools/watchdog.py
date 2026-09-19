@@ -34,22 +34,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from nio import (
-    AsyncClient,
-    Event,
-    JoinedMembersResponse,
-    MatrixRoom,
-    RoomCreateResponse,
-    RoomInviteResponse,
-    RoomMemberEvent,
-    RoomSendResponse,
-    SyncError,
-)
-
-from matrix_tools.auth import is_token_error, refresh_access_token
-from matrix_tools.config import create_client, load_config
-from matrix_tools.members import NO_INVITE_MEMBERSHIPS, get_member_status
 from matrix_tools.paths import resolve
+from matrix_tools.session import MatrixError, MatrixSession, open_session
 
 if TYPE_CHECKING:
     import argparse
@@ -59,6 +45,9 @@ NOTIFIED_FILE = "notified_wrong_server.json"
 SYNC_TIMEOUT_MS = 30000
 REFRESH_RETRY_SECONDS = 60
 SYNC_RETRY_SECONDS = 10
+# Mitgliedschafts-Status, bei denen niemand (erneut) eingeladen wird:
+# bereits Mitglied, offene Einladung, abgelehnt/ausgetreten oder gebannt.
+NO_INVITE_MEMBERSHIPS = frozenset({"join", "invite", "leave", "ban"})
 SKIP_LABELS = {
     "join": "bereits Mitglied",
     "invite": "bereits eingeladen",
@@ -186,91 +175,71 @@ def domain_of(user_id: str) -> str:
 
 
 class Watchdog:
-    """Überwacht Räume live und reagiert auf neue Beitritte."""
+    """Überwacht Räume live und reagiert auf neue Beitritte.
+
+    Beendet sich bei Fehlern nie selbst: jeder Fehler wird ausgegeben, danach
+    läuft der Watchdog weiter bzw. versucht es erneut.
+    """
 
     def __init__(
         self,
-        client: AsyncClient,
+        session: MatrixSession,
         settings: WatchdogSettings,
         config_path: Path,
         notified_path: Path,
     ) -> None:
-        """Initialisiert den Watchdog mit Client, Einstellungen und Datei-Pfaden."""
-        self.client = client
+        """Initialisiert den Watchdog mit Sitzung, Einstellungen und Datei-Pfaden."""
+        self.session = session
         self.settings = settings
         self.config_path = config_path
         self.notified_path = notified_path
         self.notified = load_notified(notified_path)
-
-    def refresh_token(self) -> bool:
-        """Erneuert den Access Token und setzt ihn im laufenden Client."""
-        access_token = refresh_access_token(self.config_path)
-        if access_token is None:
-            return False
-        self.client.access_token = access_token
-        return True
-
-    async def send_dm(self, user_id: str, message: str) -> bool:
-        """Erstellt einen DM-Raum mit user_id und schickt dort die Nachricht."""
-        resp = await self.client.room_create(
-            is_direct=True, preset=None, invite=[user_id], name=None
-        )
-        if not isinstance(resp, RoomCreateResponse):
-            print(f"   ❌ DM-Raum für {user_id} konnte nicht erstellt werden: {resp}")
-            return False
-        send_resp = await self.client.room_send(
-            room_id=resp.room_id,
-            message_type="m.room.message",
-            content={"msgtype": "m.text", "body": message},
-        )
-        if not isinstance(send_resp, RoomSendResponse):
-            print(f"   ❌ Nachricht an {user_id} konnte nicht gesendet werden: {send_resp}")
-            return False
-        return True
 
     async def invite(self, target_room: str, user_id: str, *, dry_run: bool) -> None:
         """Lädt user_id in target_room ein (bzw. simuliert es im Dry-Run)."""
         if dry_run:
             print(f"   🧪 DRY RUN - würde {user_id} in {target_room} einladen.")
             return
-        resp = await self.client.room_invite(target_room, user_id)
-        if isinstance(resp, RoomInviteResponse):
-            print(f"   ✅ {user_id} in {target_room} eingeladen.")
-        else:
-            print(f"   ❌ Einladung an {user_id} fehlgeschlagen: {resp}")
+        try:
+            await self.session.invite(target_room, user_id)
+        except MatrixError as e:
+            print(f"   ❌ {e}")
+            return
+        print(f"   ✅ {user_id} in {target_room} eingeladen.")
 
     async def invite_if_needed(self, rule: InviteRule, user_id: str) -> None:
         """Lädt user_id ein, sofern die Person nicht schon Mitglied/eingeladen/ausgetreten ist."""
-        status = await get_member_status(self.client, rule.target_room)
+        try:
+            status = await self.session.member_status(rule.target_room)
+        except MatrixError as e:
+            print(f"   ❌ {e}")
+            print(f"   {user_id} wird NICHT eingeladen.")
+            return
         current = status.get(user_id)
         if current in NO_INVITE_MEMBERSHIPS:
             print(f"   ⏭️  {user_id} übersprungen ({SKIP_LABELS[current]}).")
             return
         await self.invite(rule.target_room, user_id, dry_run=rule.dry_run)
 
-    async def joined_members(self, room_id: str) -> set[str] | None:
-        """Liest die Mitglieder eines Raums, erneuert bei Bedarf einmalig den Token."""
-        resp = await self.client.joined_members(room_id)
-        if not isinstance(resp, JoinedMembersResponse):
-            if is_token_error(resp) and self.refresh_token():
-                resp = await self.client.joined_members(room_id)
-            if not isinstance(resp, JoinedMembersResponse):
-                print(f"   ❌ Konnte {room_id} nicht lesen: {resp}")
-                return None
-        return {member.user_id for member in resp.members}
-
     async def initial_invite_pass(self, rule: InviteRule) -> None:
         """Einmaliger Abgleich beim Start für eine einzelne Auto-Invite-Regel."""
         print(f"🔍 Regel: {sorted(rule.source_rooms)} → {rule.target_room}")
         members: set[str] = set()
         for source_room in sorted(rule.source_rooms):
-            found = await self.joined_members(source_room)
-            if found is None:
+            try:
+                found = await self.session.joined_members(source_room)
+            except MatrixError as e:
+                print(f"   ❌ {e}")
                 continue
             print(f"   {len(found)} Mitglieder in {source_room}.")
             members |= found
 
-        target_status = await get_member_status(self.client, rule.target_room)
+        try:
+            target_status = await self.session.member_status(rule.target_room)
+        except MatrixError as e:
+            print(f"   ❌ {e}")
+            print("   Regel übersprungen, es wird niemand eingeladen.\n")
+            return
         for user_id in sorted(members):
             if target_status.get(user_id) not in NO_INVITE_MEMBERSHIPS:
                 await self.invite(rule.target_room, user_id, dry_run=rule.dry_run)
@@ -288,29 +257,27 @@ class Watchdog:
         if ws.dry_run:
             print("   🧪 DRY RUN - würde DM senden.")
             return
-        if await self.send_dm(user_id, ws.message):
+        try:
+            await self.session.send_direct_message(user_id, ws.message)
+        except MatrixError as e:
+            print(f"   ❌ {e}")
+        else:
             print(f"   ✅ DM an {user_id} gesendet.")
         self.notified.add(user_id)
         save_notified(self.notified_path, self.notified)
 
-    async def on_member_event(self, room: MatrixRoom, event: Event) -> None:
-        """Reagiert auf Mitgliedschafts-Events in überwachten Räumen."""
-        if not isinstance(event, RoomMemberEvent):
+    async def on_join(self, room_id: str, user_id: str) -> None:
+        """Reagiert auf einen neuen Beitritt in einem überwachten Raum."""
+        if room_id not in self.settings.watched_rooms:
             return
-        if room.room_id not in self.settings.watched_rooms:
-            return
-        if event.membership != "join" or event.prev_membership == "join":
-            return  # kein neuer Beitritt
-
-        user_id = event.state_key
-        await self.check_wrong_server(room.room_id, user_id)
-
-        for rule in self.settings.invite_rules:
-            if room.room_id in rule.source_rooms:
-                print(
-                    f"👋 Neuer Beitritt in {room.room_id}: {user_id} (Regel → {rule.target_room})"
-                )
-                await self.invite_if_needed(rule, user_id)
+        try:
+            await self.check_wrong_server(room_id, user_id)
+            for rule in self.settings.invite_rules:
+                if room_id in rule.source_rooms:
+                    print(f"👋 Neuer Beitritt in {room_id}: {user_id} (Regel → {rule.target_room})")
+                    await self.invite_if_needed(rule, user_id)
+        except Exception as e:  # noqa: BLE001 - der Watchdog darf sich nie selbst beenden
+            print(f"❌ Unerwarteter Fehler beim Beitritt von {user_id} in {room_id}: {e!r}")
 
     def print_summary(self) -> None:
         """Gibt eine Übersicht der geladenen Konfiguration aus."""
@@ -321,8 +288,36 @@ class Watchdog:
         print(f"   Auto-Invite-Regeln: {len(self.settings.invite_rules)}")
         print(f"   Insgesamt überwachte Räume: {len(self.settings.watched_rooms)}\n")
 
+    async def sync_or_wait(self) -> bool:
+        """Ein Sync-Durchlauf; bei einem Fehler Meldung ausgeben und warten.
+
+        Gibt True zurück, wenn der Sync geklappt hat.
+        """
+        try:
+            await self.session.sync(SYNC_TIMEOUT_MS)
+        except MatrixError as e:
+            if e.token_expired:
+                print(f"❌ {e}")
+                print(
+                    "   Der Access Token konnte nicht erneuert werden. Falls das anhält: "
+                    f"'matrix-tools login --config {self.config_path}' ausführen."
+                )
+                print(f"   Neuer Versuch in {REFRESH_RETRY_SECONDS}s...")
+                await asyncio.sleep(REFRESH_RETRY_SECONDS)
+            else:
+                print(f"⚠️  {e}. Neuer Versuch in {SYNC_RETRY_SECONDS}s...")
+                await asyncio.sleep(SYNC_RETRY_SECONDS)
+            return False
+        except Exception as e:  # noqa: BLE001 - der Watchdog darf sich nie selbst beenden
+            print(
+                f"❌ Unerwarteter Fehler im Sync: {e!r}. Neuer Versuch in {SYNC_RETRY_SECONDS}s..."
+            )
+            await asyncio.sleep(SYNC_RETRY_SECONDS)
+            return False
+        return True
+
     async def run_forever(self) -> None:
-        """Initialer Abgleich, danach Dauerlauf mit eigener Sync-Schleife inkl. Token-Refresh."""
+        """Initialer Abgleich, danach Dauerlauf mit eigener Sync-Schleife."""
         self.print_summary()
 
         # Wrong-Server-Check macht bewusst KEINEN initialen Abgleich - nur neue
@@ -332,29 +327,16 @@ class Watchdog:
             for rule in self.settings.invite_rules:
                 await self.initial_invite_pass(rule)
 
+        # Der erste Sync muss klappen, bevor der Callback registriert wird -
+        # sonst würden alte Beitritte aus dem Verlauf als neu behandelt.
         print("🔄 Initialer Live-Sync...")
-        resp = await self.client.sync(timeout=SYNC_TIMEOUT_MS)
-        if isinstance(resp, SyncError) and is_token_error(resp) and self.refresh_token():
-            await self.client.sync(timeout=SYNC_TIMEOUT_MS)
+        while not await self.sync_or_wait():
+            pass
         print("✅ Bereit. Warte auf neue Beitritte...\n")
 
-        self.client.add_event_callback(self.on_member_event, RoomMemberEvent)
-
-        # Eigene Sync-Schleife statt sync_forever(), für Auto-Refresh bei
-        # abgelaufenem Token.
+        self.session.on_join(self.on_join)
         while True:
-            resp = await self.client.sync(timeout=SYNC_TIMEOUT_MS)
-            if not isinstance(resp, SyncError):
-                continue
-            if not is_token_error(resp):
-                print(f"⚠️  Sync-Fehler: {resp}. Warte {SYNC_RETRY_SECONDS}s...")
-                await asyncio.sleep(SYNC_RETRY_SECONDS)
-            elif not self.refresh_token():
-                print(
-                    "❌ Token-Refresh fehlgeschlagen. "
-                    f"Warte {REFRESH_RETRY_SECONDS}s und versuche erneut..."
-                )
-                await asyncio.sleep(REFRESH_RETRY_SECONDS)
+            await self.sync_or_wait()
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -380,11 +362,11 @@ def run(args: argparse.Namespace) -> None:
     """Startet den Watchdog im Dauerlauf."""
     config_path = resolve(args.config)
     settings = parse_settings(load_settings(resolve(args.settings)), global_dry_run=args.dry_run)
-    config = load_config(config_path)
 
     async def main() -> None:
-        # Den Client erst innerhalb der Event-Loop erstellen.
-        watchdog = Watchdog(create_client(config), settings, config_path, resolve(NOTIFIED_FILE))
-        await watchdog.run_forever()
+        # Die Sitzung erst innerhalb der Event-Loop öffnen.
+        async with open_session(config_path, auto_refresh=True) as session:
+            watchdog = Watchdog(session, settings, config_path, resolve(NOTIFIED_FILE))
+            await watchdog.run_forever()
 
     asyncio.run(main())

@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING, Protocol
 
 from matrix_tools import broadcast, create_rooms, login, sync_members, watchdog
+from matrix_tools.session import TokenExpiredError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -72,3 +73,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.func(args)
     except KeyboardInterrupt:
         print("\n👋 Beendet.")
+    except TokenExpiredError as e:
+        print(f"\n❌ {e}")
+        sys.exit(1)

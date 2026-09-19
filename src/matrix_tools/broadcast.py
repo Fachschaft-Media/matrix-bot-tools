@@ -37,23 +37,13 @@ import sys
 from typing import TYPE_CHECKING
 
 import markdown
-from aiohttp import ClientError
-from nio import AsyncClient, LocalProtocolError, RoomResolveAliasResponse, RoomSendResponse
 
-from matrix_tools.config import MatrixConfig, create_client, load_config
 from matrix_tools.paths import resolve
+from matrix_tools.session import MatrixError, MatrixSession, open_session
 
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
-
-
-class AliasResolutionError(Exception):
-    """Ein Raum-Alias konnte nicht in eine Room-ID aufgelöst werden."""
-
-    def __init__(self, alias: str, reason: object) -> None:
-        """Speichert Alias und Fehlerursache in der Fehlermeldung."""
-        super().__init__(f"Alias {alias} konnte nicht aufgelöst werden: {reason}")
 
 
 def load_rooms(path: Path) -> list[str]:
@@ -100,51 +90,34 @@ def build_content(message: str, *, use_markdown: bool) -> dict[str, str]:
     return content
 
 
-async def resolve_room(client: AsyncClient, room_ref: str) -> str:
+async def resolve_room(session: MatrixSession, room_ref: str) -> str:
     """Gibt die Room-ID zurück und löst Aliase (#...) automatisch auf."""
-    if not room_ref.startswith("#"):
-        return room_ref
-    resp = await client.room_resolve_alias(room_ref)
-    if isinstance(resp, RoomResolveAliasResponse):
-        return resp.room_id
-    raise AliasResolutionError(room_ref, resp)
-
-
-async def send_to_room(client: AsyncClient, room_ref: str, content: dict[str, str]) -> str | None:
-    """Sendet die Nachricht an einen Raum. Gibt None bei Erfolg, sonst die Fehlermeldung zurück."""
-    try:
-        room_id = await resolve_room(client, room_ref)
-        resp = await client.room_send(
-            room_id=room_id,
-            message_type="m.room.message",
-            content=content,
-        )
-    except (AliasResolutionError, ClientError, LocalProtocolError, TimeoutError) as e:
-        return str(e)
-    return None if isinstance(resp, RoomSendResponse) else str(resp)
+    if room_ref.startswith("#"):
+        return await session.resolve_alias(room_ref)
+    return room_ref
 
 
 async def broadcast(
-    config: MatrixConfig, message: str, room_refs: list[str], *, use_markdown: bool
+    config_path: Path, message: str, room_refs: list[str], *, use_markdown: bool
 ) -> None:
     """Sendet die Nachricht an alle angegebenen Räume und gibt eine Zusammenfassung aus."""
     print(f"📡 Sende an {len(room_refs)} Räume...\n")
 
-    client = create_client(config)
     content = build_content(message, use_markdown=use_markdown)
     success: list[str] = []
     failed: list[tuple[str, str]] = []
 
-    for room_ref in room_refs:
-        error = await send_to_room(client, room_ref, content)
-        if error is None:
+    async with open_session(config_path) as session:
+        for room_ref in room_refs:
+            try:
+                room_id = await resolve_room(session, room_ref)
+                await session.send_message(room_id, content)
+            except MatrixError as e:
+                failed.append((room_ref, str(e)))
+                print(f"  ❌ {room_ref} -> {e}")
+                continue
             success.append(room_ref)
             print(f"  ✅ {room_ref}")
-        else:
-            failed.append((room_ref, error))
-            print(f"  ❌ {room_ref} -> {error}")
-
-    await client.close()
 
     print(f"\n📊 Fertig: {len(success)} erfolgreich, {len(failed)} fehlgeschlagen.")
     if failed:
@@ -205,5 +178,4 @@ def run(args: argparse.Namespace) -> None:
         print("❌ Raumliste ist leer.")
         return
 
-    config = load_config(resolve(args.config))
-    asyncio.run(broadcast(config, message, room_refs, use_markdown=args.markdown))
+    asyncio.run(broadcast(resolve(args.config), message, room_refs, use_markdown=args.markdown))

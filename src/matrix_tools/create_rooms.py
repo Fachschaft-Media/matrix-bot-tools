@@ -32,21 +32,14 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from aiohttp import ClientError
-from nio import AsyncClient, LocalProtocolError, RoomCreateResponse, RoomVisibility
-
-from matrix_tools.config import MatrixConfig, create_client, load_config
 from matrix_tools.paths import resolve
+from matrix_tools.session import MatrixError, MatrixSession, open_session
 
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
 
 MIN_NUMBER_WIDTH = 2
-
-
-class RoomCreationError(Exception):
-    """Der Server hat das Erstellen eines Raums abgelehnt."""
 
 
 @dataclass(frozen=True)
@@ -66,74 +59,64 @@ class RoomPlan:
         return [str(i).zfill(width) for i in range(self.start, self.start + self.count)]
 
 
-def server_name(client: AsyncClient) -> str:
-    """Gibt den Servernamen ohne Protokoll zurück (für 'via'-Angaben)."""
-    return client.homeserver.replace("https://", "").replace("http://", "")
-
-
-async def add_to_space(client: AsyncClient, space_id: str, room_id: str) -> None:
+async def add_to_space(session: MatrixSession, space_id: str, room_id: str) -> None:
     """Verknüpft einen Raum als Child eines Spaces (beide Richtungen)."""
-    via = [server_name(client)]
-    await client.room_put_state(
-        room_id=space_id,
-        event_type="m.space.child",
-        content={"via": via},
-        state_key=room_id,
-    )
-    await client.room_put_state(
-        room_id=room_id,
-        event_type="m.space.parent",
-        content={"via": via, "canonical": True},
-        state_key=space_id,
+    via = [session.server_name]
+    await session.put_state(space_id, "m.space.child", {"via": via}, state_key=room_id)
+    await session.put_state(
+        room_id, "m.space.parent", {"via": via, "canonical": True}, state_key=space_id
     )
 
 
-async def create_room(client: AsyncClient, plan: RoomPlan, number: str) -> str:
+async def create_room(session: MatrixSession, plan: RoomPlan, number: str) -> str:
     """Erstellt einen einzelnen Raum und gibt dessen Room-ID zurück.
 
-    Wirft RoomCreationError mit der Server-Antwort, falls das Erstellen fehlschlägt.
+    Wirft MatrixError, falls das Erstellen fehlschlägt.
     """
     name = f"{plan.prefix}-{number}"
-    resp = await client.room_create(
+    room_id = await session.create_room(
         name=name,
         alias=f"{plan.alias_prefix}-{number}" if plan.alias_prefix else None,
-        visibility=RoomVisibility.public if plan.public else RoomVisibility.private,
+        public=plan.public,
     )
-    if not isinstance(resp, RoomCreateResponse):
-        raise RoomCreationError(str(resp))
-    print(f"  ✅ {name} -> {resp.room_id}")
+    print(f"  ✅ {name} -> {room_id}")
 
     if plan.space_id:
         try:
-            await add_to_space(client, plan.space_id, resp.room_id)
-        except (ClientError, LocalProtocolError, TimeoutError) as e:
+            await add_to_space(session, plan.space_id, room_id)
+        except MatrixError as e:
             print(f"     ⚠️  Konnte nicht in Space eingehängt werden: {e}")
-    return resp.room_id
+    return room_id
 
 
-async def create_rooms(config: MatrixConfig, plan: RoomPlan, rooms_out: Path) -> None:
+def append_rooms(rooms_out: Path, room_ids: list[str]) -> None:
+    """Hängt die Room-IDs an die Raumliste an."""
+    with rooms_out.open("a", encoding="utf-8") as f:
+        f.writelines(room_id + "\n" for room_id in room_ids)
+    print(f"   {len(room_ids)} Room-IDs wurden an {rooms_out} angehängt.")
+
+
+async def create_rooms(config_path: Path, plan: RoomPlan, rooms_out: Path) -> None:
     """Erstellt alle geplanten Räume und hängt die neuen Room-IDs an rooms_out an."""
-    client = create_client(config)
     created: list[str] = []
     failed: list[tuple[str, str]] = []
 
-    for number in plan.numbers():
-        name = f"{plan.prefix}-{number}"
-        try:
-            created.append(await create_room(client, plan, number))
-        except (RoomCreationError, ClientError, LocalProtocolError, TimeoutError) as e:
-            failed.append((name, str(e)))
-            print(f"  ❌ {name} -> {e}")
+    try:
+        async with open_session(config_path) as session:
+            for number in plan.numbers():
+                name = f"{plan.prefix}-{number}"
+                try:
+                    created.append(await create_room(session, plan, number))
+                except MatrixError as e:
+                    failed.append((name, str(e)))
+                    print(f"  ❌ {name} -> {e}")
+    finally:
+        # Auch bei einem Abbruch (z.B. abgelaufener Token) die bereits
+        # erstellten Räume festhalten, sonst gehen ihre Room-IDs verloren.
+        print(f"\n📊 Fertig: {len(created)} erstellt, {len(failed)} fehlgeschlagen.")
+        if created:
+            append_rooms(rooms_out, created)
 
-    await client.close()
-
-    if created:
-        with rooms_out.open("a", encoding="utf-8") as f:
-            f.writelines(room_id + "\n" for room_id in created)
-
-    print(f"\n📊 Fertig: {len(created)} erstellt, {len(failed)} fehlgeschlagen.")
-    if created:
-        print(f"   Room-IDs wurden an {rooms_out} angehängt.")
     if failed:
         print("\nFehlgeschlagen:")
         for name, err in failed:
@@ -184,6 +167,5 @@ def run(args: argparse.Namespace) -> None:
         alias_prefix=args.alias_prefix,
         public=args.public,
     )
-    config = load_config(resolve(args.config))
     print(f"🏗️  Erstelle {plan.count} Räume '{plan.prefix}-{plan.numbers()[0]}' ff...\n")
-    asyncio.run(create_rooms(config, plan, resolve(args.rooms_out)))
+    asyncio.run(create_rooms(resolve(args.config), plan, resolve(args.rooms_out)))
