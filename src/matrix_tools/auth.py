@@ -8,11 +8,12 @@ Setzt voraus, dass die config.json einen 'refresh_token' enthält - den bekommst
 du über 'matrix-tools login' (einmaliger SSO-Login).
 """
 
-import json
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import requests
+
+from matrix_tools.config import read_config, save_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,11 +29,11 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
     Gibt True bei Erfolg zurück, False wenn kein refresh_token vorhanden ist
     oder der Refresh fehlschlägt.
     """
-    if not config_path.exists():
-        print("❌ config.json nicht gefunden, kann Token nicht erneuern.")
+    config = read_config(config_path)
+    if not config:
+        print(f"❌ {config_path} nicht gefunden oder unlesbar, kann Token nicht erneuern.")
         return False
 
-    config: dict[str, Any] = json.loads(config_path.read_text(encoding="utf-8"))
     refresh_token = config.get("refresh_token")
 
     if not refresh_token:
@@ -75,7 +76,7 @@ def refresh_access_token(config_path: Path, client: AsyncClient) -> bool:
     # von vorne anfangen muss
     config["access_token"] = new_access_token
     config["refresh_token"] = new_refresh_token
-    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_config(config_path, config)
 
     print("✅ Neuer Access Token erfolgreich geholt und gespeichert.")
     return True

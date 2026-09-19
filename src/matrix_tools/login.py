@@ -21,24 +21,22 @@ Muss pro config-Datei nur EINMALIG ausgeführt werden (oder wenn der Refresh
 Token doch mal ungültig werden sollte).
 """
 
-import contextlib
-import json
 import os
 import sys
 import threading
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 import requests
 
+from matrix_tools.config import read_config, save_config
 from matrix_tools.paths import resolve
 
 if TYPE_CHECKING:
     import argparse
-    from pathlib import Path
 
 IN_DOCKER_ENV = "MATRIX_TOOLS_IN_DOCKER"
 CALLBACK_PORT = 8765
@@ -112,15 +110,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _read_existing_config(config_path: Path) -> dict[str, Any]:
-    """Liest eine bestehende config-Datei, damit vorhandene Werte erhalten bleiben."""
-    if config_path.exists():
-        with contextlib.suppress(json.JSONDecodeError):
-            config: dict[str, Any] = json.loads(config_path.read_text(encoding="utf-8"))
-            return config
-    return {}
-
-
 def _wait_for_login_token(sso_url: str, *, in_docker: bool, open_browser: bool) -> str | None:
     """Startet den Callback-Server, öffnet ggf. den Browser und wartet auf den Login-Token."""
     # Im Container muss der Callback-Server über die Port-Weiterleitung von
@@ -143,7 +132,7 @@ def run(args: argparse.Namespace) -> None:
     """Führt den SSO-Login durch und speichert die Tokens in der config-Datei."""
     config_path = resolve(args.config)
     in_docker = os.environ.get(IN_DOCKER_ENV) == "1"
-    config = _read_existing_config(config_path)
+    config = read_config(config_path)
 
     homeserver = str(args.homeserver or config.get("homeserver", "")).rstrip("/")
     if not homeserver:
@@ -206,7 +195,7 @@ def run(args: argparse.Namespace) -> None:
     if expires_in_ms:
         config["expires_in_ms"] = expires_in_ms
 
-    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_config(config_path, config)
 
     print(f"\n✅ {config_path.name} aktualisiert für {user_id}.")
     if refresh_token:
