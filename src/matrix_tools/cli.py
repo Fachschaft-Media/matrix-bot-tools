@@ -3,6 +3,7 @@
 import argparse
 import io
 import sys
+import logging
 from typing import TYPE_CHECKING, Protocol
 
 from matrix_tools import broadcast, create_rooms, login, sync_members, watchdog
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     """Startet den über die Kommandozeile gewählten Befehl."""
     _force_utf8_output()
+    logging.getLogger("nio").setLevel(logging.ERROR)
     args = build_parser().parse_args(argv)
     try:
         args.func(args)
