@@ -1,0 +1,62 @@
+[project]
+name = "matrix-bot-tools"
+version = "0.1.0"
+description = "Matrix-Tools für Hochschulgruppen: Watchdog, Broadcast, Raum-Erstellung und Mitglieder-Sync."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.14.3",
+    "markdown>=3.10.3",
+    "matrix-nio>=0.26.0",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+matrix-tools = "matrix_tools.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Fachschaft-Media/matrix-bot-tools"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "matrix_tools"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "ruff>=0.16.8",
+    "types-markdown>=3.10.2.20260712",
+    "types-requests>=2.33.0.20260906",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Bewusst deaktivierte Regeln - Begründung und Anleitung zum schrittweisen
+# Wieder-Aktivieren: docs/code-qualitaet.md
+ignore = [
+    # Konflikte mit dem Ruff-Formatter
+    "COM812",
+    "ISC001",
+    # Sich widersprechende Docstring-Regeln (D211/D212 bleiben aktiv)
+    "D203",
+    "D213",
+    # print() ist die Benutzeroberfläche dieser CLI-Tools
+    "T201",
+    # Copyright-Header: es gibt (noch) keine Lizenz / keinen festgelegten Rechteinhaber
+    "CPY001",
+]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"

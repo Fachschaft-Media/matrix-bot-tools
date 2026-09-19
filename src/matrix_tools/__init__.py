@@ -1,0 +1,1 @@
+"""Matrix-Tools für Hochschulgruppen."""

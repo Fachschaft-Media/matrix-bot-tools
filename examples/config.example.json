@@ -1,0 +1,6 @@
+{
+  "homeserver": "https://matrix.eure-hochschule.de",
+  "user_id": "@euer-funktionskonto:matrix.eure-hochschule.de",
+  "access_token": "WIRD_AUTOMATISCH_VON_matrix-tools_login_GESCHRIEBEN",
+  "refresh_token": "WIRD_AUTOMATISCH_VON_matrix-tools_login_GESCHRIEBEN"
+}
