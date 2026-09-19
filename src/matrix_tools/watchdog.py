@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from matrix_tools.invites import members_of, reconcile_invites
 from matrix_tools.paths import resolve
 from matrix_tools.session import MatrixError, MatrixSession, open_session
 
@@ -45,15 +46,6 @@ NOTIFIED_FILE = "notified_wrong_server.json"
 SYNC_TIMEOUT_MS = 30000
 REFRESH_RETRY_SECONDS = 60
 SYNC_RETRY_SECONDS = 10
-# Mitgliedschafts-Status, bei denen niemand (erneut) eingeladen wird:
-# bereits Mitglied, offene Einladung, abgelehnt/ausgetreten oder gebannt.
-NO_INVITE_MEMBERSHIPS = frozenset({"join", "invite", "leave", "ban"})
-SKIP_LABELS = {
-    "join": "bereits Mitglied",
-    "invite": "bereits eingeladen",
-    "leave": "hat abgelehnt/ist ausgetreten",
-    "ban": "gebannt",
-}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -195,54 +187,23 @@ class Watchdog:
         self.notified_path = notified_path
         self.notified = load_notified(notified_path)
 
-    async def invite(self, target_room: str, user_id: str, *, dry_run: bool) -> None:
-        """Lädt user_id in target_room ein (bzw. simuliert es im Dry-Run)."""
-        if dry_run:
-            print(f"   🧪 DRY RUN - würde {user_id} in {target_room} einladen.")
-            return
-        try:
-            await self.session.invite(target_room, user_id)
-        except MatrixError as e:
-            print(f"   ❌ {e}")
-            return
-        print(f"   ✅ {user_id} in {target_room} eingeladen.")
-
     async def invite_if_needed(self, rule: InviteRule, user_id: str) -> None:
         """Lädt user_id ein, sofern die Person nicht schon Mitglied/eingeladen/ausgetreten ist."""
         try:
-            status = await self.session.member_status(rule.target_room)
+            await reconcile_invites(self.session, rule.target_room, {user_id}, dry_run=rule.dry_run)
         except MatrixError as e:
             print(f"   ❌ {e}")
             print(f"   {user_id} wird NICHT eingeladen.")
-            return
-        current = status.get(user_id)
-        if current in NO_INVITE_MEMBERSHIPS:
-            print(f"   ⏭️  {user_id} übersprungen ({SKIP_LABELS[current]}).")
-            return
-        await self.invite(rule.target_room, user_id, dry_run=rule.dry_run)
 
     async def initial_invite_pass(self, rule: InviteRule) -> None:
         """Einmaliger Abgleich beim Start für eine einzelne Auto-Invite-Regel."""
         print(f"🔍 Regel: {sorted(rule.source_rooms)} → {rule.target_room}")
-        members: set[str] = set()
-        for source_room in sorted(rule.source_rooms):
-            try:
-                found = await self.session.joined_members(source_room)
-            except MatrixError as e:
-                print(f"   ❌ {e}")
-                continue
-            print(f"   {len(found)} Mitglieder in {source_room}.")
-            members |= found
-
         try:
-            target_status = await self.session.member_status(rule.target_room)
+            members = await members_of(self.session, rule.source_rooms)
+            await reconcile_invites(self.session, rule.target_room, members, dry_run=rule.dry_run)
         except MatrixError as e:
             print(f"   ❌ {e}")
-            print("   Regel übersprungen, es wird niemand eingeladen.\n")
-            return
-        for user_id in sorted(members):
-            if target_status.get(user_id) not in NO_INVITE_MEMBERSHIPS:
-                await self.invite(rule.target_room, user_id, dry_run=rule.dry_run)
+            print("   Regel übersprungen, es wird niemand eingeladen.")
         print()
 
     async def check_wrong_server(self, room_id: str, user_id: str) -> None:
